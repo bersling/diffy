@@ -38,6 +38,10 @@ so its branch lists are live. Skip all fetching with `--no-fetch` (offline).
 - **Collapsible folder tree** sidebar with status badges (A/M/D/R/C/T), file
   counts per folder, compressed single-child directory chains, and
   collapse-all / expand-all buttons (also ⌥⌘← / ⌥⌘→)
+- **Syntax highlighting** — built-in tokenizer (no dependencies) with
+  Xcode-style colors for Swift, Kotlin, Java, TypeScript/JavaScript, Python,
+  Go, Rust, C/C++/ObjC, C#, Ruby, PHP, shell, SQL, YAML, JSON, CSS/SCSS,
+  HTML/XML, TOML/INI, Dockerfile, and more
 - **Side-by-side panes** with synchronized vertical scrolling and aligned rows
 - **Intra-line highlights** — the changed part of a modified line is emphasized,
   IntelliJ-style (blue = modified, green = added, red = deleted)

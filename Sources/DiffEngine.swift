@@ -48,6 +48,14 @@ struct DiffLine {
     let number: Int          // 1-based line number in its file
     let text: String         // tab-expanded display text
     let highlight: Range<Int>?  // intra-line changed character range (in display text)
+    let tokens: [LineToken]     // syntax-highlighting tokens (display text ranges)
+
+    init(number: Int, text: String, highlight: Range<Int>?, tokens: [LineToken] = []) {
+        self.number = number
+        self.text = text
+        self.highlight = highlight
+        self.tokens = tokens
+    }
 }
 
 struct DiffRow {
@@ -261,6 +269,8 @@ enum DiffEngine {
 
         let oldDisplay = oldLines.map(expandTabs)
         let newDisplay = newLines.map(expandTabs)
+        let oldTokens = Syntax.highlight(lines: oldDisplay, path: file.displayPath)
+        let newTokens = Syntax.highlight(lines: newDisplay, path: file.displayPath)
 
         func flushPending() {
             guard !pendingDel.isEmpty || !pendingIns.isEmpty else { return }
@@ -282,8 +292,14 @@ enum DiffEngine {
                 } else {
                     kind = .addition
                 }
-                let left = oldIdx.map { DiffLine(number: $0 + 1, text: oldDisplay[$0], highlight: leftHL) }
-                let right = newIdx.map { DiffLine(number: $0 + 1, text: newDisplay[$0], highlight: rightHL) }
+                let left = oldIdx.map {
+                    DiffLine(number: $0 + 1, text: oldDisplay[$0], highlight: leftHL,
+                             tokens: oldTokens?[$0] ?? [])
+                }
+                let right = newIdx.map {
+                    DiffLine(number: $0 + 1, text: newDisplay[$0], highlight: rightHL,
+                             tokens: newTokens?[$0] ?? [])
+                }
                 if let l = left { maxLeft = max(maxLeft, l.text.count) }
                 if let r = right { maxRight = max(maxRight, r.text.count) }
                 rows.append(DiffRow(kind: kind, left: left, right: right))
@@ -298,8 +314,10 @@ enum DiffEngine {
             switch edit {
             case .equal(let o, let n):
                 flushPending()
-                let left = DiffLine(number: o + 1, text: oldDisplay[o], highlight: nil)
-                let right = DiffLine(number: n + 1, text: newDisplay[n], highlight: nil)
+                let left = DiffLine(number: o + 1, text: oldDisplay[o], highlight: nil,
+                                    tokens: oldTokens?[o] ?? [])
+                let right = DiffLine(number: n + 1, text: newDisplay[n], highlight: nil,
+                                     tokens: newTokens?[n] ?? [])
                 maxLeft = max(maxLeft, left.text.count)
                 maxRight = max(maxRight, right.text.count)
                 rows.append(DiffRow(kind: .context, left: left, right: right))

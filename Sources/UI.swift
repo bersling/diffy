@@ -39,6 +39,31 @@ enum Theme {
     static let codeBG = dynamic(light: .white, dark: NSColor(white: 0.11, alpha: 1))
     static let accent = NSColor.controlAccentColor
 
+    // Xcode-default-inspired syntax palette
+    private static let syntaxKeyword = dynamic(light: NSColor(red: 0.68, green: 0.24, blue: 0.64, alpha: 1),
+                                               dark: NSColor(red: 0.99, green: 0.37, blue: 0.64, alpha: 1))
+    private static let syntaxString = dynamic(light: NSColor(red: 0.82, green: 0.18, blue: 0.11, alpha: 1),
+                                              dark: NSColor(red: 0.99, green: 0.42, blue: 0.37, alpha: 1))
+    private static let syntaxComment = dynamic(light: NSColor(red: 0.36, green: 0.42, blue: 0.47, alpha: 1),
+                                               dark: NSColor(red: 0.50, green: 0.55, blue: 0.60, alpha: 1))
+    private static let syntaxNumber = dynamic(light: NSColor(red: 0.15, green: 0.16, blue: 0.85, alpha: 1),
+                                              dark: NSColor(red: 0.82, green: 0.75, blue: 0.41, alpha: 1))
+    private static let syntaxType = dynamic(light: NSColor(red: 0.25, green: 0.43, blue: 0.46, alpha: 1),
+                                            dark: NSColor(red: 0.62, green: 0.94, blue: 0.87, alpha: 1))
+    private static let syntaxAttribute = dynamic(light: NSColor(red: 0.58, green: 0.44, blue: 0.0, alpha: 1),
+                                                 dark: NSColor(red: 0.99, green: 0.56, blue: 0.25, alpha: 1))
+
+    static func syntaxColor(_ kind: TokenKind) -> NSColor {
+        switch kind {
+        case .keyword: return syntaxKeyword
+        case .string: return syntaxString
+        case .comment: return syntaxComment
+        case .number: return syntaxNumber
+        case .typeName: return syntaxType
+        case .attribute: return syntaxAttribute
+        }
+    }
+
     static func statusColor(_ status: FileStatus) -> NSColor {
         switch status {
         case .added: return .systemGreen
@@ -163,12 +188,10 @@ final class DiffHalfRowView: NSView {
                     withAttributes: numAttrs)
 
         let textX = gutterWidth + 8
-        let textAttrs: [NSAttributedString.Key: Any] = [
+        let plainAttrs: [NSAttributedString.Key: Any] = [
             .font: Theme.codeFont,
             .foregroundColor: NSColor.labelColor,
         ]
-        let textSize = (line.text as NSString).size(withAttributes: textAttrs)
-        let textY = (h - textSize.height) / 2
 
         // Intra-line changed range
         if let hl = line.highlight, hl.lowerBound <= line.text.count, hl.upperBound <= line.text.count {
@@ -182,7 +205,36 @@ final class DiffHalfRowView: NSView {
             NSRect(x: textX + prefixW, y: 0.5, width: middleW, height: h - 1).fill()
         }
 
-        (line.text as NSString).draw(at: NSPoint(x: textX, y: textY), withAttributes: textAttrs)
+        // Syntax-highlighted text. Token ranges are Character offsets, so the
+        // attributed string is assembled from substrings (no UTF-16 math).
+        let attributed: NSAttributedString
+        if line.tokens.isEmpty {
+            attributed = NSAttributedString(string: line.text, attributes: plainAttrs)
+        } else {
+            let chars = Array(line.text)
+            let result = NSMutableAttributedString()
+            var cursor = 0
+            for token in line.tokens {
+                let lo = max(0, min(token.range.lowerBound, chars.count))
+                let hi = max(lo, min(token.range.upperBound, chars.count))
+                if lo > cursor {
+                    result.append(NSAttributedString(string: String(chars[cursor..<lo]),
+                                                     attributes: plainAttrs))
+                }
+                result.append(NSAttributedString(string: String(chars[lo..<hi]), attributes: [
+                    .font: Theme.codeFont,
+                    .foregroundColor: Theme.syntaxColor(token.kind),
+                ]))
+                cursor = hi
+            }
+            if cursor < chars.count {
+                result.append(NSAttributedString(string: String(chars[cursor...]),
+                                                 attributes: plainAttrs))
+            }
+            attributed = result
+        }
+        let textY = (h - attributed.size().height) / 2
+        attributed.draw(at: NSPoint(x: textX, y: textY))
     }
 }
 
