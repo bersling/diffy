@@ -31,6 +31,23 @@ those branches first so the diff reflects the actual state on the remote, and
 warns if a branch was deleted there. The wizard fetches + prunes all remotes
 so its branch lists are live. Skip all fetching with `--no-fetch` (offline).
 
+## GitLab merge requests
+
+```sh
+diffy https://gitlab.example.com/group/project/-/merge_requests/123
+```
+
+Run inside the repo checkout: diffy queries the GitLab API for the MR, fetches
+the right refs (including `refs/merge-requests/<iid>/head`, so merged or
+deleted source branches still work), and opens the MR's exact diff with
+**review comments inline** — threads appear under the lines they belong to,
+resolved ones dimmed, and commented lines are never folded away. **Reply** on
+any thread, or **right-click a line → Add Comment** to start a new one.
+
+The token is auto-discovered (first match wins, invalid tokens are skipped):
+`$DIFFY_GITLAB_TOKEN` → `~/.config/diffy/gitlab-token` → any gitlab MCP server
+in `~/.claude.json` → `$GITLAB_TOKEN` / `$GITLAB_PERSONAL_ACCESS_TOKEN`.
+
 ## Features
 
 - **Branch wizard** — plain `diffy` opens a picker: "Branch with diffs" and

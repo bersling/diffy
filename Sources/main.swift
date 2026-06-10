@@ -9,6 +9,7 @@ USAGE:
 
 EXAMPLES:
   diffy                          open the branch-selection wizard
+  diffy <gitlab-mr-url>          open a GitLab MR with inline review comments
   diffy HEAD                     HEAD vs working tree
   diffy master                   your work vs master (since you diverged from it)
   diffy master develop           changes in develop since it diverged from master
@@ -20,7 +21,12 @@ EXAMPLES:
   diffy --two-dot master develop (or: diffy master..develop)
 
   Remote refs (origin/...) are fetched automatically before comparing, so the
-  diff reflects the actual state on the remote. Skip with --no-fetch. under src/
+  diff reflects the actual state on the remote. Skip with --no-fetch.
+
+  GitLab: run inside the repo checkout with the MR URL to see the MR's exact
+  diff plus its review comments inline; right-click a line to add a comment.
+  The token is read from $GITLAB_TOKEN, ~/.config/diffy/gitlab-token, or an
+  existing gitlab MCP server entry in ~/.claude.json. under src/
 
 KEYS:
   n / p (or ⌘J / ⌘K)             next / previous change
@@ -106,12 +112,41 @@ while i < args.count {
 
 // Plain `diffy` opens the branch-selection wizard; `diffy HEAD` etc. go
 // straight to the viewer. Dump mode keeps HEAD-vs-worktree for scripting.
+// A GitLab MR URL opens that MR's diff with review comments.
+let mrRef = refs.lazy.compactMap(MRRef.parse).first
 let wizardMode = refs.isEmpty && !dumpMode
 
 var session: DiffSession? = nil
 var wizardGit: Git? = nil
 do {
-    if wizardMode {
+    if let mrRef = mrRef {
+        let client = try GitLabClient(ref: mrRef)
+        FileHandle.standardError.write(Data("diffy: loading MR !\(mrRef.iid) from \(mrRef.host)…\n".utf8))
+        let mr = try client.fetchMR()
+        let git = try Git(cwd: FileManager.default.currentDirectoryPath)
+        if !noFetch {
+            for branch in [mr.targetBranch, mr.sourceBranch] {
+                FileHandle.standardError.write(Data("diffy: fetching origin/\(branch)…\n".utf8))
+                _ = git.fetch(remote: "origin", branch: branch)
+            }
+            // GitLab keeps every MR's head reachable via a special ref even
+            // after squash-merges or source-branch deletion.
+            _ = git.fetch(remote: "origin", branch: "refs/merge-requests/\(mrRef.iid)/head")
+        }
+        for sha in [mr.baseSha, mr.headSha] where git.resolve(sha) == nil {
+            throw GitError(message: """
+                commit \(sha) from the MR is not present locally — \
+                is this the right repository checkout for \(mrRef.projectPath)?
+                """)
+        }
+        let s = try DiffSession(cwd: git.repoRoot,
+                                refs: [mr.baseSha, mr.headSha], paths: paths,
+                                twoDot: true, noFetch: true,
+                                labels: ("\(mr.targetBranch) (MR base)", mr.sourceBranch))
+        let threads = try client.fetchDiscussions()
+        s.mr = MRContext(client: client, mr: mr, threads: threads)
+        session = s
+    } else if wizardMode {
         wizardGit = try Git(cwd: FileManager.default.currentDirectoryPath)
     } else {
         session = try DiffSession(cwd: FileManager.default.currentDirectoryPath,

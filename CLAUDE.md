@@ -45,3 +45,7 @@
   per-branch); deleted-on-remote branches warn and are marked in the title.
   The wizard fetches + prunes all remotes before listing. `--no-fetch` opts out.
 - Plain `diffy` opens the branch wizard; `diffy HEAD` is worktree-vs-HEAD.
+- `diffy <gitlab-mr-url>` opens the MR's exact diff (diff_refs) with review
+  comments inline; reply + right-click-to-comment post via the GitLab API.
+  Token discovery: $DIFFY_GITLAB_TOKEN → ~/.config/diffy/gitlab-token →
+  gitlab MCP entries in ~/.claude.json → $GITLAB_TOKEN (401s skip to next).

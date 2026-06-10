@@ -78,11 +78,12 @@ enum Theme {
 
 enum PaneSide { case left, right }
 
-/// What a diff pane actually displays: either a real diff row, or a fold bar
-/// standing in for a run of hidden unchanged rows.
+/// What a diff pane actually displays: a real diff row, a fold bar standing
+/// in for hidden unchanged rows, or a review-comment thread.
 enum DisplayRow {
     case line(fullIndex: Int, row: DiffRow)
     case fold(range: Range<Int>, count: Int)
+    case comment(thread: MRThread, side: PaneSide, anchor: Int)
 }
 
 /// Opaque view that always paints the window background color (appearance-aware).
@@ -292,6 +293,143 @@ final class FoldRowView: NSView {
     }
 }
 
+// MARK: - Review comment rows
+
+final class CommentRowView: NSView {
+    static let reuseID = NSUserInterfaceItemIdentifier("CommentRow")
+    static let spacerReuseID = NSUserInterfaceItemIdentifier("CommentSpacerRow")
+
+    private static let authorFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+    private static let dateFont = NSFont.systemFont(ofSize: 10)
+    private static let bodyFont = NSFont.systemFont(ofSize: 12)
+    private static let cardMarginX: CGFloat = 16
+    private static let cardPadding: CGFloat = 10
+    private static let outerMarginY: CGFloat = 4
+    private static let authorLineHeight: CGFloat = 16
+    private static let noteSpacing: CGFloat = 6
+    private static let replyRowHeight: CGFloat = 24
+
+    private var thread: MRThread?
+    private var cardWidth: CGFloat = 400
+    var onReply: ((MRThread) -> Void)?
+    private let replyButton = NSButton()
+
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        replyButton.title = "Reply…"
+        replyButton.bezelStyle = .recessed
+        replyButton.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        replyButton.target = self
+        replyButton.action = #selector(replyClicked)
+        addSubview(replyButton)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func configure(thread: MRThread, cardWidth: CGFloat) {
+        self.thread = thread
+        self.cardWidth = cardWidth
+        updateForVisibleRect()
+        needsDisplay = true
+    }
+
+    @objc private func replyClicked() {
+        if let thread = thread { onReply?(thread) }
+    }
+
+    /// Card and button track the visible portion when scrolled horizontally.
+    func updateForVisibleRect() {
+        let originX = (visibleRect.isEmpty ? 0 : visibleRect.minX) + Self.cardMarginX
+        replyButton.frame = NSRect(x: originX + Self.cardPadding,
+                                   y: bounds.height - Self.outerMarginY - Self.cardPadding - 21,
+                                   width: 70, height: 19)
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        updateForVisibleRect()
+    }
+
+    private static func bodyHeight(_ body: String, textWidth: CGFloat) -> CGFloat {
+        let attr = NSAttributedString(string: body, attributes: [.font: bodyFont])
+        let rect = attr.boundingRect(with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+                                     options: [.usesLineFragmentOrigin, .usesFontLeading])
+        return ceil(rect.height)
+    }
+
+    static func height(thread: MRThread, cardWidth: CGFloat) -> CGFloat {
+        let textWidth = max(120, cardWidth - 2 * cardMarginX - 2 * cardPadding)
+        var h = 2 * outerMarginY + 2 * cardPadding + replyRowHeight
+        for note in thread.notes {
+            h += authorLineHeight + bodyHeight(note.body, textWidth: textWidth) + noteSpacing
+        }
+        return ceil(h)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.codeBG.setFill()
+        bounds.fill()
+        guard let thread = thread else { return }
+
+        let originX = (visibleRect.isEmpty ? 0 : visibleRect.minX) + Self.cardMarginX
+        let cardRect = NSRect(x: originX, y: Self.outerMarginY,
+                              width: cardWidth - 2 * Self.cardMarginX,
+                              height: bounds.height - 2 * Self.outerMarginY)
+        let card = NSBezierPath(roundedRect: cardRect, xRadius: 8, yRadius: 8)
+        let alpha: CGFloat = thread.resolved ? 0.55 : 1.0
+        NSColor.controlBackgroundColor.withAlphaComponent(alpha).setFill()
+        card.fill()
+        NSColor.separatorColor.setStroke()
+        card.lineWidth = 1
+        card.stroke()
+
+        let textX = cardRect.minX + Self.cardPadding
+        let textWidth = max(120, cardRect.width - 2 * Self.cardPadding)
+        var y = cardRect.minY + Self.cardPadding
+
+        if thread.resolved {
+            let badge = "Resolved ✓" as NSString
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: Self.dateFont, .foregroundColor: NSColor.systemGreen,
+            ]
+            let size = badge.size(withAttributes: attrs)
+            badge.draw(at: NSPoint(x: cardRect.maxX - Self.cardPadding - size.width, y: y),
+                       withAttributes: attrs)
+        }
+
+        for note in thread.notes {
+            let textColor = NSColor.labelColor.withAlphaComponent(thread.resolved ? 0.6 : 1)
+            let author = note.author as NSString
+            author.draw(at: NSPoint(x: textX, y: y), withAttributes: [
+                .font: Self.authorFont, .foregroundColor: textColor,
+            ])
+            let authorWidth = author.size(withAttributes: [.font: Self.authorFont]).width
+            (String(note.createdAt.prefix(10)) as NSString)
+                .draw(at: NSPoint(x: textX + authorWidth + 8, y: y + 1), withAttributes: [
+                    .font: Self.dateFont, .foregroundColor: NSColor.tertiaryLabelColor,
+                ])
+            y += Self.authorLineHeight
+            let bodyHeight = Self.bodyHeight(note.body, textWidth: textWidth)
+            (note.body as NSString).draw(
+                in: NSRect(x: textX, y: y, width: textWidth, height: bodyHeight),
+                withAttributes: [.font: Self.bodyFont, .foregroundColor: textColor])
+            y += bodyHeight + Self.noteSpacing
+        }
+    }
+}
+
+/// Blank stand-in on the opposite pane so both tables stay row-aligned.
+final class CommentSpacerRowView: NSView {
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.codeBG.setFill()
+        bounds.fill()
+    }
+}
+
 // MARK: - One pane (scroll view + table)
 
 final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
@@ -304,9 +442,22 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     var gutterWidth: CGFloat = 48
     var currentBlockRange: Range<Int>?  // in full-row indices
     var onFoldClick: ((Range<Int>) -> Void)?
+    var onReplyToThread: ((MRThread) -> Void)?
+    var onAddComment: ((Int, PaneSide) -> Void)?  // (fullIndex, side)
+    var commentingEnabled = false
     weak var partner: DiffPane?
     private var isSyncing = false
     private var contentWidth: CGFloat = 0
+    private var lastClipWidth: CGFloat = 0
+    private let contextMenu = NSMenu()
+
+    private var clipWidth: CGFloat {
+        max(240, scrollView.contentView.bounds.width)
+    }
+
+    private var hasCommentRows: Bool {
+        rows.contains { if case .comment = $0 { return true } else { return false } }
+    }
 
     init(side: PaneSide) {
         self.side = side
@@ -343,6 +494,9 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
                                                name: NSView.boundsDidChangeNotification, object: clip)
         NotificationCenter.default.addObserver(self, selector: #selector(frameChanged),
                                                name: NSView.frameDidChangeNotification, object: clip)
+
+        contextMenu.delegate = self
+        table.menu = contextMenu
     }
 
     func setContent(rows: [DisplayRow], maxColumns: Int, maxLineNumber: Int) {
@@ -350,7 +504,9 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         currentBlockRange = nil
         let digits = max(2, String(max(maxLineNumber, 1)).count)
         gutterWidth = CGFloat(digits) * Theme.charWidth + 20
-        contentWidth = gutterWidth + 8 + CGFloat(maxColumns) * Theme.charWidth + 30
+        // Clamp: minified single-line files would otherwise exceed AppKit's
+        // internal layout limits.
+        contentWidth = min(gutterWidth + 8 + CGFloat(maxColumns) * Theme.charWidth + 30, 100_000)
         table.reloadData()
         updateColumnWidth()
         let clip = scrollView.contentView
@@ -407,10 +563,11 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     @objc private func boundsChanged() {
-        // Fold labels are centered in the visible rect; keep them centered
-        // while scrolling horizontally.
+        // Fold labels and comment cards anchor to the visible rect; keep them
+        // in place while scrolling horizontally.
         table.enumerateAvailableRowViews { rowView, _ in
             (rowView.view(atColumn: 0) as? FoldRowView)?.needsDisplay = true
+            (rowView.view(atColumn: 0) as? CommentRowView)?.updateForVisibleRect()
         }
         guard !isSyncing, let partner = partner else { return }
         let y = scrollView.contentView.bounds.origin.y
@@ -425,6 +582,23 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     @objc private func frameChanged() {
         updateColumnWidth()
+        // Comment cards wrap to the visible width; re-measure on resize.
+        if hasCommentRows && abs(clipWidth - lastClipWidth) > 0.5 {
+            lastClipWidth = clipWidth
+            let commentRows = IndexSet(rows.indices.filter {
+                if case .comment = rows[$0] { return true } else { return false }
+            })
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = 0
+            table.noteHeightOfRows(withIndexesChanged: commentRows)
+            NSAnimationContext.endGrouping()
+            table.enumerateAvailableRowViews { rowView, row in
+                if case .comment(let thread, _, _) = self.rows[row],
+                   let view = rowView.view(atColumn: 0) as? CommentRowView {
+                    view.configure(thread: thread, cardWidth: self.clipWidth)
+                }
+            }
+        }
     }
 
     // MARK: table
@@ -453,10 +627,59 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
             view.configure(range: range, count: count)
             view.onClick = { [weak self] range in self?.onFoldClick?(range) }
             return view
+        case .comment(let thread, let commentSide, _):
+            if commentSide == side {
+                let view = (tableView.makeView(withIdentifier: CommentRowView.reuseID, owner: nil) as? CommentRowView)
+                    ?? {
+                        let v = CommentRowView()
+                        v.identifier = CommentRowView.reuseID
+                        return v
+                    }()
+                view.configure(thread: thread, cardWidth: clipWidth)
+                view.onReply = { [weak self] thread in self?.onReplyToThread?(thread) }
+                return view
+            } else {
+                let view = (tableView.makeView(withIdentifier: CommentRowView.spacerReuseID, owner: nil) as? CommentSpacerRowView)
+                    ?? {
+                        let v = CommentSpacerRowView()
+                        v.identifier = CommentRowView.spacerReuseID
+                        return v
+                    }()
+                return view
+            }
         }
     }
 
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if case .comment(let thread, _, _) = rows[row] {
+            return CommentRowView.height(thread: thread, cardWidth: clipWidth)
+        }
+        return Theme.rowHeight
+    }
+
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+}
+
+extension DiffPane: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard commentingEnabled else { return }
+        let row = table.clickedRow
+        guard row >= 0, row < rows.count,
+              case .line(let fullIndex, let diffRow) = rows[row] else { return }
+        let line = side == .left ? diffRow.left : diffRow.right
+        guard let line = line, diffRow.kind != .message else { return }
+        let item = NSMenuItem(title: "Add Comment on Line \(line.number)…",
+                              action: #selector(addCommentClicked(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = fullIndex
+        menu.addItem(item)
+    }
+
+    @objc private func addCommentClicked(_ sender: NSMenuItem) {
+        guard let fullIndex = sender.representedObject as? Int else { return }
+        onAddComment?(fullIndex, side)
+    }
 }
 
 // MARK: - Sidebar file tree
@@ -823,6 +1046,7 @@ final class ContentViewController: NSViewController {
     private var displayRows: [DisplayRow] = []
     private var fullToDisplay: [Int: Int] = [:]
     private var expandedFolds: Set<Int> = []  // keyed by fold range lowerBound
+    private var commentMap: [Int: [(MRThread, PaneSide)]] = [:]  // full row index → threads
 
     /// Lines of context kept visible around each change; longer unchanged
     /// runs are folded behind a clickable bar.
@@ -839,6 +1063,18 @@ final class ContentViewController: NSViewController {
         }
         leftPane.onFoldClick = expand
         rightPane.onFoldClick = expand
+        let reply: (MRThread) -> Void = { [weak self] thread in
+            self?.replyToThread(thread)
+        }
+        leftPane.onReplyToThread = reply
+        rightPane.onReplyToThread = reply
+        let addComment: (Int, PaneSide) -> Void = { [weak self] fullIndex, side in
+            self?.addComment(atFullIndex: fullIndex, side: side)
+        }
+        leftPane.onAddComment = addComment
+        rightPane.onAddComment = addComment
+        leftPane.commentingEnabled = session.mr != nil
+        rightPane.commentingEnabled = session.mr != nil
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -950,14 +1186,38 @@ final class ContentViewController: NSViewController {
         statsLabel.attributedStringValue = stats
 
         expandedFolds.removeAll()
+        rebuildCommentMap()
         rebuildDisplayRows()
         leftPane.setContent(rows: displayRows, maxColumns: diff.maxLeftColumns, maxLineNumber: diff.maxLineNumber)
         rightPane.setContent(rows: displayRows, maxColumns: diff.maxRightColumns, maxLineNumber: diff.maxLineNumber)
         updateCounter()
     }
 
+    /// Anchors the MR's review threads to full-row indices of the current file.
+    private func rebuildCommentMap() {
+        commentMap = [:]
+        guard let mr = session.mr, let diff = currentDiff else { return }
+        let threads = mr.threads(for: diff.file)
+        guard !threads.isEmpty else { return }
+        var rowByRightLine: [Int: Int] = [:]
+        var rowByLeftLine: [Int: Int] = [:]
+        for (i, row) in diff.rows.enumerated() {
+            if let r = row.right { rowByRightLine[r.number] = i }
+            if let l = row.left { rowByLeftLine[l.number] = i }
+        }
+        for thread in threads {
+            guard let pos = thread.position else { continue }
+            if let nl = pos.newLine, pos.newPath == diff.file.newPath, let idx = rowByRightLine[nl] {
+                commentMap[idx, default: []].append((thread, .right))
+            } else if let ol = pos.oldLine, let idx = rowByLeftLine[ol] {
+                commentMap[idx, default: []].append((thread, .left))
+            }
+        }
+    }
+
     /// Rebuilds the display list: context runs longer than the threshold are
-    /// folded, keeping `contextLines` visible around each change.
+    /// folded, keeping `contextLines` visible around each change. Lines with
+    /// review comments are never folded; their threads follow them as rows.
     private func rebuildDisplayRows() {
         guard let diff = currentDiff else {
             displayRows = []
@@ -970,16 +1230,19 @@ final class ContentViewController: NSViewController {
         func emit(_ idx: Int) {
             map[idx] = out.count
             out.append(.line(fullIndex: idx, row: rows[idx]))
+            for (thread, side) in commentMap[idx] ?? [] {
+                out.append(.comment(thread: thread, side: side, anchor: idx))
+            }
         }
         var i = 0
         while i < rows.count {
-            guard rows[i].kind == .context else {
+            guard rows[i].kind == .context && commentMap[i] == nil else {
                 emit(i)
                 i += 1
                 continue
             }
             var j = i
-            while j < rows.count && rows[j].kind == .context { j += 1 }
+            while j < rows.count && rows[j].kind == .context && commentMap[j] == nil { j += 1 }
             let head = i == 0 ? 0 : Self.contextLines           // after previous change
             let tail = j == rows.count ? 0 : Self.contextLines  // before next change
             let hideStart = i + head
@@ -1062,6 +1325,91 @@ final class ContentViewController: NSViewController {
         }
     }
 
+    // MARK: GitLab review comments
+
+    /// Modal text-entry dialog; returns nil on cancel.
+    private func commentDialog(title: String, button: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Cancel")
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 380, height: 100))
+        let textView = NSTextView(frame: scroll.bounds)
+        textView.font = NSFont.systemFont(ofSize: 12)
+        textView.isRichText = false
+        textView.allowsUndo = true
+        scroll.documentView = textView
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        alert.accessoryView = scroll
+        alert.window.initialFirstResponder = textView
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let text = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private func showError(_ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "GitLab request failed"
+        alert.informativeText = "\(error)"
+        alert.runModal()
+    }
+
+    private func refreshComments() {
+        guard let mr = session.mr else { return }
+        mr.refresh()
+        rebuildCommentMap()
+        rebuildDisplayRows()
+        leftPane.updateRows(displayRows)
+        rightPane.updateRows(displayRows)
+    }
+
+    private func replyToThread(_ thread: MRThread) {
+        guard let mr = session.mr,
+              let body = commentDialog(title: "Reply to \(thread.notes.first?.author ?? "thread")",
+                                       button: "Reply") else { return }
+        do {
+            try mr.client.postReply(discussionID: thread.id, body: body)
+            refreshComments()
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func addComment(atFullIndex fullIndex: Int, side: PaneSide) {
+        guard let mr = session.mr, let diff = currentDiff,
+              fullIndex < diff.rows.count else { return }
+        let row = diff.rows[fullIndex]
+        let file = diff.file
+        var oldLine: Int?
+        var newLine: Int?
+        switch side {
+        case .right:
+            guard let r = row.right else { return }
+            newLine = r.number
+            if row.kind == .context { oldLine = row.left?.number }
+        case .left:
+            guard let l = row.left else { return }
+            oldLine = l.number
+            if row.kind == .context { newLine = row.right?.number }
+        }
+        let lineDesc = newLine.map { "line \($0)" } ?? "old line \(oldLine ?? 0)"
+        guard let body = commentDialog(
+            title: "Comment on \((file.displayPath as NSString).lastPathComponent), \(lineDesc)",
+            button: "Comment") else { return }
+        let position = MRPosition(
+            oldPath: file.oldPath.isEmpty ? file.newPath : file.oldPath,
+            newPath: file.newPath.isEmpty ? file.oldPath : file.newPath,
+            oldLine: oldLine, newLine: newLine)
+        do {
+            try mr.client.postThread(mr: mr.mr, body: body, position: position)
+            refreshComments()
+        } catch {
+            showError(error)
+        }
+    }
+
     @objc func nextChange(_ sender: Any?) {
         goToBlock(currentBlock + 1)
     }
@@ -1087,7 +1435,12 @@ final class MainWindowController: NSWindowController {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 850),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
-        window.title = "diffy — \(session.title)  (\(session.files.count) file\(session.files.count == 1 ? "" : "s"))"
+        let fileCount = "(\(session.files.count) file\(session.files.count == 1 ? "" : "s"))"
+        if let mr = session.mr {
+            window.title = "diffy — !\(mr.mr.iid) \(mr.mr.title) — \(session.title)  \(fileCount)"
+        } else {
+            window.title = "diffy — \(session.title)  \(fileCount)"
+        }
         window.minSize = NSSize(width: 760, height: 400)
         window.center()
         window.setFrameAutosaveName("DiffyMainWindow")

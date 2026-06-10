@@ -179,6 +179,7 @@ final class DiffSession {
     private(set) var leftLabel: String
     private(set) var rightLabel: String
     let files: [ChangedFile]
+    var mr: MRContext?   // set when opened from a GitLab MR URL
     private var cache: [Int: FileDiff] = [:]
 
     /// Fetches every `<remote>/<branch>` mentioned in the refs so the diff
@@ -239,7 +240,7 @@ final class DiffSession {
     }
 
     init(cwd: String, refs: [String], paths: [String], twoDot: Bool = false,
-         noFetch: Bool = false) throws {
+         noFetch: Bool = false, labels: (left: String, right: String)? = nil) throws {
         self.git = try Git(cwd: cwd)
 
         let deletedOnRemote = noFetch ? [] : DiffSession.fetchRemoteRefs(git: git, refs: refs)
@@ -296,6 +297,10 @@ final class DiffSession {
         for ref in deletedOnRemote {
             leftLabel = leftLabel.replacingOccurrences(of: ref, with: "\(ref) ⚠︎ deleted on remote")
             rightLabel = rightLabel.replacingOccurrences(of: ref, with: "\(ref) ⚠︎ deleted on remote")
+        }
+        if let labels = labels {
+            leftLabel = labels.left
+            rightLabel = labels.right
         }
 
         self.files = try git.changedFiles(leftRef: leftRef, rightRef: rightRef, paths: paths)
