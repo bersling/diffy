@@ -1341,12 +1341,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource,
         view.window?.makeFirstResponder(searchField)
     }
 
+    func isFileVisibleForTest(_ index: Int) -> Bool { nodeByFileIndex[index] != nil }
+
     func applyFilterForTest(_ query: String) {
         searchField.stringValue = query
         applyFilter(query)
     }
 
     func selectFile(at index: Int) {
+        // If the target file is hidden by the active filter, clear the filter
+        // so the file becomes reachable (e.g. jumping to a comment's file).
+        if nodeByFileIndex[index] == nil && !filterText.isEmpty {
+            searchField.stringValue = ""
+            applyFilter("")
+        }
         guard let node = nodeByFileIndex[index] else { return }
         // Expand collapsed ancestors so the row exists, topmost first.
         var ancestors: [FileNode] = []
@@ -2240,6 +2248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let fileFilterQuery: String?
     let showCommentsOnLaunch: Bool
     let testShortcutGuard: Bool
+    let testFilterJump: Bool
     var windowController: MainWindowController?
     var wizardController: WizardWindowController?
 
@@ -2249,7 +2258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          initialChangeJumps: Int = 0, autoConfirm: Bool = false,
          expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false,
          copyLinesRange: ClosedRange<Int>? = nil, fileFilterQuery: String? = nil,
-         showCommentsOnLaunch: Bool = false, testShortcutGuard: Bool = false) {
+         showCommentsOnLaunch: Bool = false, testShortcutGuard: Bool = false,
+         testFilterJump: Bool = false) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
@@ -2264,6 +2274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.fileFilterQuery = fileFilterQuery
         self.showCommentsOnLaunch = showCommentsOnLaunch
         self.testShortcutGuard = testShortcutGuard
+        self.testFilterJump = testFilterJump
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2323,6 +2334,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("diff focused → intercept:", wc.shortcutWouldInterceptForTest())
             wc.sidebarVC.focusSearchFieldForTest()
             print("search focused → intercept:", wc.shortcutWouldInterceptForTest())
+            NSApp.terminate(nil)
+        }
+        if testFilterJump {
+            // Filter to exclude file 0, then jump to it — should clear filter.
+            wc.sidebarVC.applyFilterForTest("zzz-no-match-except-via-jump")
+            print("after filter, file 0 visible:", wc.sidebarVC.isFileVisibleForTest(0))
+            wc.sidebarVC.selectFile(at: 0)
+            print("after jump, selected index:", wc.contentVC.currentIndex)
             NSApp.terminate(nil)
         }
         if let range = copyLinesRange {
