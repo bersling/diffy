@@ -12,13 +12,7 @@
    - no hardcoded user-specific paths (`/Users/...`) or other private info
    - build artifacts stay out of git (`diffy` binary and `dist/` are
      gitignored — keep it that way)
-3. **Maintain PROMPT_COUNTER.md on every user prompt** — two parts:
-   - The `Count:` number. A UserPromptSubmit hook in `.claude/settings.json`
-     should bump it automatically; if it didn't fire (check the count vs. the
-     actual prompt number), bump it manually so the count stays honest.
-   - **Append every prompt to "The prompts" list** as a one-line paraphrase,
-     numbered to match the count. The hook only bumps the number; the list is
-     always maintained by hand. Include both in the next commit.
+(The prompt-counter experiment was removed on request — don't reintroduce it.)
 
 ## Build & test
 
