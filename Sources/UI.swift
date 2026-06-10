@@ -533,9 +533,20 @@ final class CommentRowView: NSView {
     private static let cardMarginX: CGFloat = 16
     private static let cardPadding: CGFloat = 10
     private static let outerMarginY: CGFloat = 4
-    private static let authorLineHeight: CGFloat = 16
-    private static let noteSpacing: CGFloat = 6
-    private static let replyRowHeight: CGFloat = 24
+    private static let authorLineHeight: CGFloat = 17
+    private static let bodyTopGap: CGFloat = 3      // author → its body
+    private static let noteSpacing: CGFloat = 14    // between notes (separator sits in the middle)
+    private static let replyRowHeight: CGFloat = 28
+    private static let avatarInset: CGFloat = 16    // text indent leaving room for the avatar dot
+    private static let avatarDiameter: CGFloat = 9
+
+    /// Stable per-author colour for the avatar dot (djb2 hash → hue).
+    private static func avatarColor(_ name: String) -> NSColor {
+        var h = 5381
+        for b in name.utf8 { h = ((h << 5) &+ h) &+ Int(b) }
+        let hue = CGFloat(abs(h) % 360) / 360.0
+        return NSColor(hue: hue, saturation: 0.5, brightness: 0.8, alpha: 1)
+    }
 
     private var thread: MRThread?
     private var cardWidth: CGFloat = 400
@@ -606,10 +617,11 @@ final class CommentRowView: NSView {
     }
 
     static func height(thread: MRThread, cardWidth: CGFloat) -> CGFloat {
-        let textWidth = max(120, cardWidth - 2 * cardMarginX - 2 * cardPadding)
+        let textWidth = max(120, cardWidth - 2 * cardMarginX - 2 * cardPadding - avatarInset)
         var h = 2 * outerMarginY + 2 * cardPadding + replyRowHeight
-        for note in thread.notes {
-            h += authorLineHeight + bodyHeight(note.body, textWidth: textWidth) + noteSpacing
+        for (i, note) in thread.notes.enumerated() {
+            if i > 0 { h += noteSpacing }
+            h += authorLineHeight + bodyTopGap + bodyHeight(note.body, textWidth: textWidth)
         }
         return ceil(h)
     }
@@ -635,8 +647,9 @@ final class CommentRowView: NSView {
         card.lineWidth = 1
         card.stroke()
 
-        let textX = cardRect.minX + Self.cardPadding
-        let textWidth = max(120, cardRect.width - 2 * Self.cardPadding)
+        let dotX = cardRect.minX + Self.cardPadding
+        let textX = dotX + Self.avatarInset
+        let textWidth = max(120, cardRect.width - 2 * Self.cardPadding - Self.avatarInset)
         var y = cardRect.minY + Self.cardPadding
 
         if thread.resolved || thread.isDraft {
@@ -650,8 +663,23 @@ final class CommentRowView: NSView {
                        withAttributes: attrs)
         }
 
-        for note in thread.notes {
+        for (i, note) in thread.notes.enumerated() {
+            if i > 0 {
+                // hairline separator centered in the inter-note gap
+                y += Self.noteSpacing / 2
+                NSColor.separatorColor.withAlphaComponent(0.6).setFill()
+                NSRect(x: textX, y: y - 0.5, width: cardRect.maxX - Self.cardPadding - textX,
+                       height: 1).fill()
+                y += Self.noteSpacing / 2
+            }
             let textColor = NSColor.labelColor.withAlphaComponent(thread.resolved ? 0.6 : 1)
+
+            // avatar dot, vertically centered on the author line
+            let dot = NSRect(x: dotX, y: y + (Self.authorLineHeight - Self.avatarDiameter) / 2,
+                             width: Self.avatarDiameter, height: Self.avatarDiameter)
+            Self.avatarColor(note.author).withAlphaComponent(thread.resolved ? 0.6 : 1).setFill()
+            NSBezierPath(ovalIn: dot).fill()
+
             let author = note.author as NSString
             author.draw(at: NSPoint(x: textX, y: y), withAttributes: [
                 .font: Self.authorFont, .foregroundColor: textColor,
@@ -664,12 +692,12 @@ final class CommentRowView: NSView {
                     .foregroundColor: note.isPending
                         ? NSColor.systemOrange : NSColor.tertiaryLabelColor,
                 ])
-            y += Self.authorLineHeight
+            y += Self.authorLineHeight + Self.bodyTopGap
             let bodyHeight = Self.bodyHeight(note.body, textWidth: textWidth)
             (note.body as NSString).draw(
                 in: NSRect(x: textX, y: y, width: textWidth, height: bodyHeight),
                 withAttributes: [.font: Self.bodyFont, .foregroundColor: textColor])
-            y += bodyHeight + Self.noteSpacing
+            y += bodyHeight
         }
     }
 }

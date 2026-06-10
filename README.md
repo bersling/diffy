@@ -41,8 +41,10 @@ Run inside the repo checkout: diffy queries the GitLab API for the MR, fetches
 the right refs (including `refs/merge-requests/<iid>/head`, so merged or
 deleted source branches still work), and opens the MR's exact diff with
 **review comments inline** — threads appear under the lines they belong to,
-resolved ones dimmed, and commented lines are never folded away. **Reply** on
-any thread, or **right-click a line → Add Comment** to start a new one.
+resolved ones dimmed, commented lines never folded away. Each note carries a
+colour-coded author dot and notes are separated by hairlines, so multi-reply
+threads stay readable. **Reply** on any thread, or **right-click a line → Add
+Comment** to start a new one.
 
 Comments default to **Add to Review** (GitLab review batching): they stay
 private drafts — shown as orange *Pending* cards with a Discard button — until
