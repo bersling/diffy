@@ -44,6 +44,11 @@ deleted source branches still work), and opens the MR's exact diff with
 resolved ones dimmed, and commented lines are never folded away. **Reply** on
 any thread, or **right-click a line → Add Comment** to start a new one.
 
+Comments default to **Add to Review** (GitLab review batching): they stay
+private drafts — shown as orange *Pending* cards with a Discard button — until
+you publish them all at once with the **Submit Review (N)** button in the
+header. "Send Now" posts immediately instead.
+
 The token is auto-discovered (first match wins, invalid tokens are skipped):
 `$DIFFY_GITLAB_TOKEN` → `~/.config/diffy/gitlab-token` → any gitlab MCP server
 in `~/.claude.json` → `$GITLAB_TOKEN` / `$GITLAB_PERSONAL_ACCESS_TOKEN`.

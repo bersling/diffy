@@ -312,7 +312,9 @@ final class CommentRowView: NSView {
     private var thread: MRThread?
     private var cardWidth: CGFloat = 400
     var onReply: ((MRThread) -> Void)?
+    var onDiscard: ((MRThread) -> Void)?
     private let replyButton = NSButton()
+    private let discardButton = NSButton()
 
     override var isFlipped: Bool { true }
 
@@ -324,6 +326,12 @@ final class CommentRowView: NSView {
         replyButton.target = self
         replyButton.action = #selector(replyClicked)
         addSubview(replyButton)
+        discardButton.title = "Discard Draft"
+        discardButton.bezelStyle = .recessed
+        discardButton.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        discardButton.target = self
+        discardButton.action = #selector(discardClicked)
+        addSubview(discardButton)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -331,6 +339,8 @@ final class CommentRowView: NSView {
     func configure(thread: MRThread, cardWidth: CGFloat) {
         self.thread = thread
         self.cardWidth = cardWidth
+        replyButton.isHidden = thread.isDraft  // can't reply before publishing
+        discardButton.isHidden = !thread.hasPending
         updateForVisibleRect()
         needsDisplay = true
     }
@@ -339,12 +349,19 @@ final class CommentRowView: NSView {
         if let thread = thread { onReply?(thread) }
     }
 
-    /// Card and button track the visible portion when scrolled horizontally.
+    @objc private func discardClicked() {
+        if let thread = thread { onDiscard?(thread) }
+    }
+
+    /// Card and buttons track the visible portion when scrolled horizontally.
     func updateForVisibleRect() {
         let originX = (visibleRect.isEmpty ? 0 : visibleRect.minX) + Self.cardMarginX
-        replyButton.frame = NSRect(x: originX + Self.cardPadding,
-                                   y: bounds.height - Self.outerMarginY - Self.cardPadding - 21,
-                                   width: 70, height: 19)
+        let y = bounds.height - Self.outerMarginY - Self.cardPadding - 21
+        replyButton.frame = NSRect(x: originX + Self.cardPadding, y: y, width: 70, height: 19)
+        let discardX = replyButton.isHidden
+            ? originX + Self.cardPadding
+            : replyButton.frame.maxX + 8
+        discardButton.frame = NSRect(x: discardX, y: y, width: 105, height: 19)
         needsDisplay = true
     }
 
@@ -382,7 +399,11 @@ final class CommentRowView: NSView {
         let alpha: CGFloat = thread.resolved ? 0.55 : 1.0
         NSColor.controlBackgroundColor.withAlphaComponent(alpha).setFill()
         card.fill()
-        NSColor.separatorColor.setStroke()
+        if thread.hasPending {
+            NSColor.systemOrange.withAlphaComponent(0.7).setStroke()
+        } else {
+            NSColor.separatorColor.setStroke()
+        }
         card.lineWidth = 1
         card.stroke()
 
@@ -390,10 +411,11 @@ final class CommentRowView: NSView {
         let textWidth = max(120, cardRect.width - 2 * Self.cardPadding)
         var y = cardRect.minY + Self.cardPadding
 
-        if thread.resolved {
-            let badge = "Resolved ✓" as NSString
+        if thread.resolved || thread.isDraft {
+            let badge = (thread.isDraft ? "Pending review" : "Resolved ✓") as NSString
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: Self.dateFont, .foregroundColor: NSColor.systemGreen,
+                .font: Self.dateFont,
+                .foregroundColor: thread.isDraft ? NSColor.systemOrange : NSColor.systemGreen,
             ]
             let size = badge.size(withAttributes: attrs)
             badge.draw(at: NSPoint(x: cardRect.maxX - Self.cardPadding - size.width, y: y),
@@ -407,9 +429,12 @@ final class CommentRowView: NSView {
                 .font: Self.authorFont, .foregroundColor: textColor,
             ])
             let authorWidth = author.size(withAttributes: [.font: Self.authorFont]).width
-            (String(note.createdAt.prefix(10)) as NSString)
+            let dateText = note.isPending ? "Pending" : String(note.createdAt.prefix(10))
+            (dateText as NSString)
                 .draw(at: NSPoint(x: textX + authorWidth + 8, y: y + 1), withAttributes: [
-                    .font: Self.dateFont, .foregroundColor: NSColor.tertiaryLabelColor,
+                    .font: Self.dateFont,
+                    .foregroundColor: note.isPending
+                        ? NSColor.systemOrange : NSColor.tertiaryLabelColor,
                 ])
             y += Self.authorLineHeight
             let bodyHeight = Self.bodyHeight(note.body, textWidth: textWidth)
@@ -443,6 +468,7 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     var currentBlockRange: Range<Int>?  // in full-row indices
     var onFoldClick: ((Range<Int>) -> Void)?
     var onReplyToThread: ((MRThread) -> Void)?
+    var onDiscardDraft: ((MRThread) -> Void)?
     var onAddComment: ((Int, PaneSide) -> Void)?  // (fullIndex, side)
     var commentingEnabled = false
     weak var partner: DiffPane?
@@ -637,6 +663,7 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
                     }()
                 view.configure(thread: thread, cardWidth: clipWidth)
                 view.onReply = { [weak self] thread in self?.onReplyToThread?(thread) }
+                view.onDiscard = { [weak self] thread in self?.onDiscardDraft?(thread) }
                 return view
             } else {
                 let view = (tableView.makeView(withIdentifier: CommentRowView.spacerReuseID, owner: nil) as? CommentSpacerRowView)
@@ -1039,6 +1066,7 @@ final class ContentViewController: NSViewController {
     private let pathLabel = NSTextField(labelWithString: "")
     private let statsLabel = NSTextField(labelWithString: "")
     private let counterLabel = NSTextField(labelWithString: "")
+    private let reviewButton = NSButton()
 
     private(set) var currentIndex: Int = -1
     private var currentDiff: FileDiff?
@@ -1068,6 +1096,11 @@ final class ContentViewController: NSViewController {
         }
         leftPane.onReplyToThread = reply
         rightPane.onReplyToThread = reply
+        let discard: (MRThread) -> Void = { [weak self] thread in
+            self?.discardDrafts(of: thread)
+        }
+        leftPane.onDiscardDraft = discard
+        rightPane.onDiscardDraft = discard
         let addComment: (Int, PaneSide) -> Void = { [weak self] fullIndex, side in
             self?.addComment(atFullIndex: fullIndex, side: side)
         }
@@ -1111,7 +1144,16 @@ final class ContentViewController: NSViewController {
         let prev = navButton("chevron.up", fallback: "▲", action: #selector(prevChange(_:)), tooltip: "Previous Change (P)")
         let next = navButton("chevron.down", fallback: "▼", action: #selector(nextChange(_:)), tooltip: "Next Change (N)")
 
-        let headerStack = NSStackView(views: [pathLabel, statsLabel, NSView(), counterLabel, prev, next])
+        reviewButton.bezelStyle = .rounded
+        reviewButton.controlSize = .small
+        reviewButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        reviewButton.contentTintColor = .systemOrange
+        reviewButton.target = self
+        reviewButton.action = #selector(submitReview(_:))
+        reviewButton.toolTip = "Publish all pending review comments at once"
+        reviewButton.isHidden = true
+
+        let headerStack = NSStackView(views: [pathLabel, statsLabel, NSView(), reviewButton, counterLabel, prev, next])
         headerStack.orientation = .horizontal
         headerStack.spacing = 8
         headerStack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 10)
@@ -1191,13 +1233,14 @@ final class ContentViewController: NSViewController {
         leftPane.setContent(rows: displayRows, maxColumns: diff.maxLeftColumns, maxLineNumber: diff.maxLineNumber)
         rightPane.setContent(rows: displayRows, maxColumns: diff.maxRightColumns, maxLineNumber: diff.maxLineNumber)
         updateCounter()
+        updateReviewButton()
     }
 
     /// Anchors the MR's review threads to full-row indices of the current file.
     private func rebuildCommentMap() {
         commentMap = [:]
         guard let mr = session.mr, let diff = currentDiff else { return }
-        let threads = mr.threads(for: diff.file)
+        let threads = mr.displayThreads(for: diff.file)
         guard !threads.isEmpty else { return }
         var rowByRightLine: [Int: Int] = [:]
         var rowByLeftLine: [Int: Int] = [:]
@@ -1327,11 +1370,14 @@ final class ContentViewController: NSViewController {
 
     // MARK: GitLab review comments
 
-    /// Modal text-entry dialog; returns nil on cancel.
-    private func commentDialog(title: String, button: String) -> String? {
+    /// Modal text-entry dialog. Returns the text and whether to send
+    /// immediately (true) or batch into the pending review (false).
+    private func commentDialog(title: String) -> (body: String, sendNow: Bool)? {
         let alert = NSAlert()
         alert.messageText = title
-        alert.addButton(withTitle: button)
+        alert.informativeText = "“Add to Review” batches the comment; submit the whole review at once with the Submit Review button."
+        alert.addButton(withTitle: "Add to Review")
+        alert.addButton(withTitle: "Send Now")
         alert.addButton(withTitle: "Cancel")
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 380, height: 100))
         let textView = NSTextView(frame: scroll.bounds)
@@ -1343,9 +1389,15 @@ final class ContentViewController: NSViewController {
         scroll.borderType = .bezelBorder
         alert.accessoryView = scroll
         alert.window.initialFirstResponder = textView
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let response = alert.runModal()
+        let sendNow: Bool
+        switch response {
+        case .alertFirstButtonReturn: sendNow = false
+        case .alertSecondButtonReturn: sendNow = true
+        default: return nil
+        }
         let text = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
+        return text.isEmpty ? nil : (text, sendNow)
     }
 
     private func showError(_ error: Error) {
@@ -1363,14 +1415,48 @@ final class ContentViewController: NSViewController {
         rebuildDisplayRows()
         leftPane.updateRows(displayRows)
         rightPane.updateRows(displayRows)
+        updateReviewButton()
+    }
+
+    func updateReviewButton() {
+        let count = session.mr?.draftCount ?? 0
+        reviewButton.isHidden = count == 0
+        reviewButton.title = "Submit Review (\(count))"
+    }
+
+    @objc private func submitReview(_ sender: Any?) {
+        guard let mr = session.mr, mr.draftCount > 0 else { return }
+        do {
+            try mr.client.publishDrafts()
+            refreshComments()
+        } catch {
+            showError(error)
+        }
+    }
+
+    private func discardDrafts(of thread: MRThread) {
+        guard let mr = session.mr, !thread.draftIDs.isEmpty else { return }
+        do {
+            for id in thread.draftIDs {
+                try mr.client.deleteDraft(id: id)
+            }
+            refreshComments()
+        } catch {
+            showError(error)
+        }
     }
 
     private func replyToThread(_ thread: MRThread) {
         guard let mr = session.mr,
-              let body = commentDialog(title: "Reply to \(thread.notes.first?.author ?? "thread")",
-                                       button: "Reply") else { return }
+              let (body, sendNow) = commentDialog(
+                  title: "Reply to \(thread.notes.first?.author ?? "thread")") else { return }
         do {
-            try mr.client.postReply(discussionID: thread.id, body: body)
+            if sendNow {
+                try mr.client.postReply(discussionID: thread.id, body: body)
+            } else {
+                try mr.client.createDraft(mr: mr.mr, body: body, position: nil,
+                                          replyToDiscussionID: thread.id)
+            }
             refreshComments()
         } catch {
             showError(error)
@@ -1395,15 +1481,20 @@ final class ContentViewController: NSViewController {
             if row.kind == .context { newLine = row.right?.number }
         }
         let lineDesc = newLine.map { "line \($0)" } ?? "old line \(oldLine ?? 0)"
-        guard let body = commentDialog(
-            title: "Comment on \((file.displayPath as NSString).lastPathComponent), \(lineDesc)",
-            button: "Comment") else { return }
+        guard let (body, sendNow) = commentDialog(
+            title: "Comment on \((file.displayPath as NSString).lastPathComponent), \(lineDesc)")
+        else { return }
         let position = MRPosition(
             oldPath: file.oldPath.isEmpty ? file.newPath : file.oldPath,
             newPath: file.newPath.isEmpty ? file.oldPath : file.newPath,
             oldLine: oldLine, newLine: newLine)
         do {
-            try mr.client.postThread(mr: mr.mr, body: body, position: position)
+            if sendNow {
+                try mr.client.postThread(mr: mr.mr, body: body, position: position)
+            } else {
+                try mr.client.createDraft(mr: mr.mr, body: body, position: position,
+                                          replyToDiscussionID: nil)
+            }
             refreshComments()
         } catch {
             showError(error)

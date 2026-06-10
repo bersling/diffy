@@ -47,5 +47,8 @@
 - Plain `diffy` opens the branch wizard; `diffy HEAD` is worktree-vs-HEAD.
 - `diffy <gitlab-mr-url>` opens the MR's exact diff (diff_refs) with review
   comments inline; reply + right-click-to-comment post via the GitLab API.
+  Comments default to draft notes (review batching) published together via
+  the Submit Review button; drafts are private, so create+delete is a safe
+  E2E test. bulk_publish is the only untested-live call.
   Token discovery: $DIFFY_GITLAB_TOKEN → ~/.config/diffy/gitlab-token →
   gitlab MCP entries in ~/.claude.json → $GITLAB_TOKEN (401s skip to next).

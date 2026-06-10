@@ -49,6 +49,7 @@ struct MRNote {
     let body: String
     let createdAt: String
     let system: Bool
+    var isPending = false   // unpublished draft (part of your review)
 }
 
 struct MRThread {
@@ -56,6 +57,17 @@ struct MRThread {
     let notes: [MRNote]
     let position: MRPosition?
     let resolved: Bool
+    var isDraft = false     // thread that exists only as your draft
+    var draftIDs: [Int] = []  // draft notes contained in this thread
+
+    var hasPending: Bool { notes.contains { $0.isPending } }
+}
+
+struct MRDraft {
+    let id: Int
+    let note: String
+    let position: MRPosition?
+    let discussionID: String?  // set when the draft replies to a thread
 }
 
 struct GitLabError: Error, CustomStringConvertible {
@@ -174,9 +186,10 @@ final class GitLabClient {
             if let error = error {
                 throw GitLabError(message: "GitLab request failed: \(error.localizedDescription)")
             }
-            guard let data = result else {
+            if status == 0 && result == nil {
                 throw GitLabError(message: "GitLab request timed out")
             }
+            let data = result ?? Data()  // 204 No Content responses
             if status == 401, tokenIndex + 1 < tokens.count {
                 tokenIndex += 1
                 continue
@@ -261,6 +274,75 @@ final class GitLabClient {
                         jsonBody: ["body": body])
     }
 
+    // MARK: draft notes (review batching)
+
+    private static func parsePosition(_ p: [String: Any]?) -> MRPosition? {
+        guard let p = p, (p["position_type"] as? String ?? "text") == "text" else { return nil }
+        return MRPosition(oldPath: p["old_path"] as? String ?? "",
+                          newPath: p["new_path"] as? String ?? "",
+                          oldLine: p["old_line"] as? Int,
+                          newLine: p["new_line"] as? Int)
+    }
+
+    func fetchDraftNotes() throws -> [MRDraft] {
+        var drafts: [MRDraft] = []
+        var page = 1
+        while true {
+            let data = try request(method: "GET",
+                                   path: "/merge_requests/\(ref.iid)/draft_notes",
+                                   query: ["per_page": "100", "page": "\(page)"])
+            guard let items = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                throw GitLabError(message: "unexpected draft_notes response")
+            }
+            for item in items {
+                guard let id = item["id"] as? Int,
+                      let note = item["note"] as? String else { continue }
+                let discussionID = (item["discussion_id"] as? String)
+                    ?? (item["discussion_id"] as? Int).map(String.init)
+                drafts.append(MRDraft(id: id, note: note,
+                                      position: Self.parsePosition(item["position"] as? [String: Any]),
+                                      discussionID: discussionID))
+            }
+            if items.count < 100 { break }
+            page += 1
+        }
+        return drafts
+    }
+
+    func createDraft(mr: GitLabMR, body: String, position: MRPosition?,
+                     replyToDiscussionID: String?) throws {
+        var json: [String: Any] = ["note": body]
+        if let discussionID = replyToDiscussionID {
+            json["in_reply_to_discussion_id"] = discussionID
+        }
+        if let position = position {
+            var pos: [String: Any] = [
+                "position_type": "text",
+                "base_sha": mr.baseSha,
+                "start_sha": mr.startSha,
+                "head_sha": mr.headSha,
+                "old_path": position.oldPath,
+                "new_path": position.newPath,
+            ]
+            if let l = position.oldLine { pos["old_line"] = l }
+            if let l = position.newLine { pos["new_line"] = l }
+            json["position"] = pos
+        }
+        _ = try request(method: "POST",
+                        path: "/merge_requests/\(ref.iid)/draft_notes",
+                        jsonBody: json)
+    }
+
+    func publishDrafts() throws {
+        _ = try request(method: "POST",
+                        path: "/merge_requests/\(ref.iid)/draft_notes/bulk_publish")
+    }
+
+    func deleteDraft(id: Int) throws {
+        _ = try request(method: "DELETE",
+                        path: "/merge_requests/\(ref.iid)/draft_notes/\(id)")
+    }
+
     func postThread(mr: GitLabMR, body: String, position: MRPosition) throws {
         var pos: [String: Any] = [
             "position_type": "text",
@@ -284,25 +366,57 @@ final class MRContext {
     let client: GitLabClient
     let mr: GitLabMR
     var threads: [MRThread]
+    var drafts: [MRDraft]
 
-    init(client: GitLabClient, mr: GitLabMR, threads: [MRThread]) {
+    init(client: GitLabClient, mr: GitLabMR, threads: [MRThread], drafts: [MRDraft]) {
         self.client = client
         self.mr = mr
         self.threads = threads
+        self.drafts = drafts
     }
 
     func refresh() {
         if let fresh = try? client.fetchDiscussions() {
             threads = fresh
         }
+        drafts = (try? client.fetchDraftNotes()) ?? drafts
     }
 
-    /// Positioned, non-empty threads for one changed file.
-    func threads(for file: ChangedFile) -> [MRThread] {
-        threads.filter { thread in
-            guard let pos = thread.position else { return false }
-            return (!file.newPath.isEmpty && pos.newPath == file.newPath)
-                || (!file.oldPath.isEmpty && pos.oldPath == file.oldPath)
+    var draftCount: Int { drafts.count }
+
+    private static func matches(_ pos: MRPosition?, _ file: ChangedFile) -> Bool {
+        guard let pos = pos else { return false }
+        return (!file.newPath.isEmpty && pos.newPath == file.newPath)
+            || (!file.oldPath.isEmpty && pos.oldPath == file.oldPath)
+    }
+
+    /// Threads to display for one file: published threads (with your pending
+    /// draft replies appended) plus standalone draft threads.
+    func displayThreads(for file: ChangedFile) -> [MRThread] {
+        var result: [MRThread] = []
+        for thread in threads where Self.matches(thread.position, file) {
+            var notes = thread.notes
+            var draftIDs: [Int] = []
+            for draft in drafts where draft.discussionID == thread.id {
+                notes.append(MRNote(id: -draft.id, author: "You", body: draft.note,
+                                    createdAt: "draft", system: false, isPending: true))
+                draftIDs.append(draft.id)
+            }
+            var combined = thread
+            if !draftIDs.isEmpty {
+                combined = MRThread(id: thread.id, notes: notes, position: thread.position,
+                                    resolved: thread.resolved, isDraft: false, draftIDs: draftIDs)
+            }
+            result.append(combined)
         }
+        for draft in drafts where draft.discussionID == nil && Self.matches(draft.position, file) {
+            result.append(MRThread(
+                id: "draft-\(draft.id)",
+                notes: [MRNote(id: -draft.id, author: "You", body: draft.note,
+                               createdAt: "draft", system: false, isPending: true)],
+                position: draft.position, resolved: false,
+                isDraft: true, draftIDs: [draft.id]))
+        }
+        return result
     }
 }

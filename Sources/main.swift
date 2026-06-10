@@ -144,7 +144,8 @@ do {
                                 twoDot: true, noFetch: true,
                                 labels: ("\(mr.targetBranch) (MR base)", mr.sourceBranch))
         let threads = try client.fetchDiscussions()
-        s.mr = MRContext(client: client, mr: mr, threads: threads)
+        let drafts = (try? client.fetchDraftNotes()) ?? []
+        s.mr = MRContext(client: client, mr: mr, threads: threads, drafts: drafts)
         session = s
     } else if wizardMode {
         wizardGit = try Git(cwd: FileManager.default.currentDirectoryPath)
