@@ -62,6 +62,7 @@ var noFetch = false
 var copyLinesRange: ClosedRange<Int>? = nil
 var mentionUITestPath: String? = nil
 var fileFilterQuery: String? = nil
+var showCommentsOnLaunch = false
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -124,6 +125,8 @@ while i < args.count {
         i += 1
         guard i < args.count else { fail("--filter-files requires a query") }
         fileFilterQuery = args[i]
+    } else if arg == "--show-comments" {
+        showCommentsOnLaunch = true
     } else if arg == "--collapse-folders" {
         collapseFoldersOnLaunch = true
     } else if arg == "--copy-lines" {
@@ -255,6 +258,7 @@ let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
                            expandAllOnLaunch: expandAllOnLaunch,
                            collapseFoldersOnLaunch: collapseFoldersOnLaunch,
                            copyLinesRange: copyLinesRange,
-                           fileFilterQuery: fileFilterQuery)
+                           fileFilterQuery: fileFilterQuery,
+                           showCommentsOnLaunch: showCommentsOnLaunch)
 app.delegate = delegate
 app.run()

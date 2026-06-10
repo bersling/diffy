@@ -52,6 +52,10 @@ header. "Send Now" posts immediately instead.
 Type **`@`** in any comment to autocomplete project members (↑/↓ to navigate,
 Enter/Tab/click to insert), so mentions notify the right people on GitLab.
 
+The header's **Comments (N)** button opens an overview of every review thread
+in the MR (file, line, author, snippet, resolved/pending state) — click one to
+jump straight to that line.
+
 The token is auto-discovered (first match wins, invalid tokens are skipped):
 `$DIFFY_GITLAB_TOKEN` → `~/.config/diffy/gitlab-token` → any gitlab MCP server
 in `~/.claude.json` → `$GITLAB_TOKEN` / `$GITLAB_PERSONAL_ACCESS_TOKEN`.

@@ -1419,6 +1419,9 @@ final class ContentViewController: NSViewController {
     private let statsLabel = NSTextField(labelWithString: "")
     private let counterLabel = NSTextField(labelWithString: "")
     private let reviewButton = NSButton()
+    private let commentsButton = NSButton()
+    private var commentsPopover: NSPopover?
+    var onNavigateToFile: ((Int) -> Void)?
 
     private(set) var currentIndex: Int = -1
     private var currentDiff: FileDiff?
@@ -1505,7 +1508,15 @@ final class ContentViewController: NSViewController {
         reviewButton.toolTip = "Publish all pending review comments at once"
         reviewButton.isHidden = true
 
-        let headerStack = NSStackView(views: [pathLabel, statsLabel, NSView(), reviewButton, counterLabel, prev, next])
+        commentsButton.bezelStyle = .rounded
+        commentsButton.controlSize = .small
+        commentsButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        commentsButton.target = self
+        commentsButton.action = #selector(showAllComments(_:))
+        commentsButton.toolTip = "Show all review comments in this MR"
+        commentsButton.isHidden = true
+
+        let headerStack = NSStackView(views: [pathLabel, statsLabel, NSView(), commentsButton, reviewButton, counterLabel, prev, next])
         headerStack.orientation = .horizontal
         headerStack.spacing = 8
         headerStack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 10)
@@ -1775,6 +1786,51 @@ final class ContentViewController: NSViewController {
         let count = session.mr?.draftCount ?? 0
         reviewButton.isHidden = count == 0
         reviewButton.title = "Submit Review (\(count))"
+
+        guard let mr = session.mr else { commentsButton.isHidden = true; return }
+        let total = mr.allThreadLocations(files: session.files).count
+        commentsButton.isHidden = total == 0
+        commentsButton.title = "Comments (\(total))"
+    }
+
+    func showAllCommentsForTest() { showAllComments(nil) }
+
+    @objc private func showAllComments(_ sender: Any?) {
+        guard let mr = session.mr else { return }
+        let entries = mr.allThreadLocations(files: session.files).map {
+            CommentsListController.Entry(fileIndex: $0.fileIndex, line: $0.line,
+                                         path: session.files[$0.fileIndex].displayPath,
+                                         thread: $0.thread)
+        }
+        guard !entries.isEmpty else { return }
+        let list = CommentsListController(entries: entries)
+        let popover = NSPopover()
+        popover.contentViewController = list
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 400, height: list.view.frame.height)
+        list.onSelect = { [weak self, weak popover] entry in
+            popover?.close()
+            self?.navigateToComment(entry)
+        }
+        commentsPopover = popover
+        popover.show(relativeTo: commentsButton.bounds, of: commentsButton, preferredEdge: .maxY)
+    }
+
+    private func navigateToComment(_ entry: CommentsListController.Entry) {
+        if entry.fileIndex != currentIndex {
+            onNavigateToFile?(entry.fileIndex)  // selects file in sidebar → showFile
+        }
+        // After the file is shown, scroll to the thread's row.
+        DispatchQueue.main.async { [weak self] in
+            self?.scrollToThread(id: entry.thread.id)
+        }
+    }
+
+    private func scrollToThread(id: String) {
+        guard let displayIndex = displayRows.firstIndex(where: {
+            if case .comment(let t, _, _) = $0 { return t.id == id } else { return false }
+        }) else { return }
+        leftPane.scrollToRow(displayIndex, animated: true)
     }
 
     @objc private func submitReview(_ sender: Any?) {
@@ -1910,6 +1966,9 @@ final class MainWindowController: NSWindowController {
         sidebarVC.onSelect = { [weak self] index in
             self?.contentVC.showFile(at: index)
         }
+        contentVC.onNavigateToFile = { [weak self] index in
+            self?.sidebarVC.selectFile(at: index)
+        }
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
@@ -1979,6 +2038,99 @@ final class MainWindowController: NSWindowController {
         let target = contentVC.currentIndex + offset
         guard target >= 0 && target < session.files.count else { return }
         sidebarVC.selectFile(at: target)
+    }
+}
+
+// MARK: - All-comments overview popover
+
+final class CommentsListController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    struct Entry {
+        let fileIndex: Int
+        let line: Int
+        let path: String
+        let thread: MRThread
+    }
+
+    private let entries: [Entry]
+    private let table = NSTableView()
+    var onSelect: ((Entry) -> Void)?
+
+    init(entries: [Entry]) {
+        self.entries = entries
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let scroll = NSScrollView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("c"))
+        column.width = 380
+        table.addTableColumn(column)
+        table.headerView = nil
+        if #available(macOS 11.0, *) { table.style = .fullWidth }
+        table.rowHeight = 54
+        table.dataSource = self
+        table.delegate = self
+        table.action = #selector(rowClicked)
+        table.target = self
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400,
+                                             height: min(420, max(60, CGFloat(entries.count) * 54 + 8))))
+        scroll.frame = container.bounds
+        scroll.autoresizingMask = [.width, .height]
+        container.addSubview(scroll)
+        self.view = container
+    }
+
+    @objc private func rowClicked() {
+        let row = table.clickedRow
+        guard row >= 0, row < entries.count else { return }
+        onSelect?(entries[row])
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let id = NSUserInterfaceItemIdentifier("ccell")
+        let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? {
+            let c = NSTableCellView()
+            c.identifier = id
+            let label = NSTextField(wrappingLabelWithString: "")
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.maximumNumberOfLines = 3
+            c.addSubview(label)
+            c.textField = label
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 8),
+                label.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -8),
+                label.centerYAnchor.constraint(equalTo: c.centerYAnchor),
+            ])
+            return c
+        }()
+        let e = entries[row]
+        let first = e.thread.notes.first
+        let header = NSMutableAttributedString(
+            string: "\((e.path as NSString).lastPathComponent):\(e.line)",
+            attributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+                         .foregroundColor: NSColor.labelColor])
+        if e.thread.resolved {
+            header.append(NSAttributedString(string: "  ✓",
+                attributes: [.foregroundColor: NSColor.systemGreen,
+                             .font: NSFont.systemFont(ofSize: 11)]))
+        } else if e.thread.hasPending {
+            header.append(NSAttributedString(string: "  • pending",
+                attributes: [.foregroundColor: NSColor.systemOrange,
+                             .font: NSFont.systemFont(ofSize: 10)]))
+        }
+        let snippet = (first?.body ?? "").replacingOccurrences(of: "\n", with: " ")
+        header.append(NSAttributedString(
+            string: "\n\(first?.author ?? "")  \(String(snippet.prefix(80)))",
+            attributes: [.font: NSFont.systemFont(ofSize: 11),
+                         .foregroundColor: NSColor.secondaryLabelColor]))
+        cell.textField?.attributedStringValue = header
+        return cell
     }
 }
 
@@ -2070,6 +2222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let collapseFoldersOnLaunch: Bool
     let copyLinesRange: ClosedRange<Int>?
     let fileFilterQuery: String?
+    let showCommentsOnLaunch: Bool
     var windowController: MainWindowController?
     var wizardController: WizardWindowController?
 
@@ -2078,7 +2231,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          screenshotPath: String?, initialFileIndex: Int = 0,
          initialChangeJumps: Int = 0, autoConfirm: Bool = false,
          expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false,
-         copyLinesRange: ClosedRange<Int>? = nil, fileFilterQuery: String? = nil) {
+         copyLinesRange: ClosedRange<Int>? = nil, fileFilterQuery: String? = nil,
+         showCommentsOnLaunch: Bool = false) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
@@ -2091,6 +2245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.collapseFoldersOnLaunch = collapseFoldersOnLaunch
         self.copyLinesRange = copyLinesRange
         self.fileFilterQuery = fileFilterQuery
+        self.showCommentsOnLaunch = showCommentsOnLaunch
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2112,7 +2267,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         if let path = screenshotPath {
-            let delay = autoConfirm ? 1.8 : 0.8
+            var delay = autoConfirm ? 1.8 : 0.8
+            if showCommentsOnLaunch { delay += 0.6 }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.captureScreenshot(to: path)
                 NSApp.terminate(nil)
@@ -2139,6 +2295,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let query = fileFilterQuery {
             wc.sidebarVC.applyFilterForTest(query)
         }
+        if showCommentsOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                wc.contentVC.showAllCommentsForTest()
+            }
+        }
         if let range = copyLinesRange {
             // Headless test path: select rows in the right pane, copy, print.
             let pane = wc.contentVC.rightPane
@@ -2156,11 +2317,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     private func captureScreenshot(to path: String) {
-        let targetWindow = windowController?.window ?? wizardController?.window
-        guard let view = targetWindow?.contentView,
-              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: rep)
-        if let png = rep.representation(using: .png, properties: [:]) {
+        guard let targetWindow = windowController?.window ?? wizardController?.window else { return }
+        // Composite the window with any child windows (popovers) so overlays
+        // like the comments list are captured too.
+        var windows: [NSWindow] = [targetWindow]
+        windows.append(contentsOf: targetWindow.childWindows ?? [])
+        if windows.count == 1 {
+            guard let view = targetWindow.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            if let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: path))
+            }
+            return
+        }
+        let union = windows.reduce(NSRect.null) { $0.union($1.frame) }
+        guard !union.isEmpty,
+              let combined = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int(union.width), pixelsHigh: Int(union.height),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: combined)
+        for win in windows {
+            guard let view = win.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            rep.draw(in: NSRect(x: win.frame.minX - union.minX,
+                                y: union.maxY - win.frame.maxY,
+                                width: win.frame.width, height: win.frame.height))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        if let png = combined.representation(using: .png, properties: [:]) {
             try? png.write(to: URL(fileURLWithPath: path))
         }
     }

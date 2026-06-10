@@ -422,6 +422,19 @@ final class MRContext {
 
     var draftCount: Int { drafts.count }
 
+    /// Every positioned thread paired with the file it belongs to, in file
+    /// order — for the all-comments overview. Returns (fileIndex, line, thread).
+    func allThreadLocations(files: [ChangedFile]) -> [(fileIndex: Int, line: Int, thread: MRThread)] {
+        var result: [(Int, Int, MRThread)] = []
+        for file in files.indices {
+            for thread in displayThreads(for: files[file]) {
+                guard let pos = thread.position else { continue }
+                result.append((file, pos.newLine ?? pos.oldLine ?? 0, thread))
+            }
+        }
+        return result
+    }
+
     private static func matches(_ pos: MRPosition?, _ file: ChangedFile) -> Bool {
         guard let pos = pos else { return false }
         return (!file.newPath.isEmpty && pos.newPath == file.newPath)

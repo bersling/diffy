@@ -33,7 +33,8 @@
   More hidden test flags: `--select <n>`, `--change <n>`, `--expand-all`,
   `--collapse-folders`, `--appearance light|dark`, `--auto-confirm`,
   `--two-dot`, `--no-fetch`, `--filter-files <q>`, `--copy-lines a-b`,
-  `--test-mention <q>`, `--test-mention-ui <png>`.
+  `--test-mention <q>`, `--test-mention-ui <png>`, `--show-comments`.
+  Screenshot capture composites child windows (popovers).
 - Test fixture: `/tmp/diffy-fixture` (master/develop, covers
   modify/add/delete/rename/binary/unicode/nested dirs, bare remote at
   /tmp/diffy-remote.git). Recreate if missing.
