@@ -48,6 +48,12 @@ The token is auto-discovered (first match wins, invalid tokens are skipped):
 `$DIFFY_GITLAB_TOKEN` → `~/.config/diffy/gitlab-token` → any gitlab MCP server
 in `~/.claude.json` → `$GITLAB_TOKEN` / `$GITLAB_PERSONAL_ACCESS_TOKEN`.
 
+**Token permissions:** create a [personal access token](https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html)
+(GitLab → User settings → Access tokens) with the **`api`** scope — needed to
+read merge requests/discussions *and* post comments. If you only want to view
+MRs and comments (no posting), the read-only **`read_api`** scope is enough.
+The token's user must have at least Reporter access to the project.
+
 ## Features
 
 - **Branch wizard** — plain `diffy` opens a picker: "Branch with diffs" and
