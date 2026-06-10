@@ -1139,6 +1139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let session: DiffSession?      // nil = start with the branch wizard
     let wizardGit: Git?
     let paths: [String]
+    let noFetch: Bool
     let screenshotPath: String?
     let initialFileIndex: Int
     let initialChangeJumps: Int
@@ -1149,12 +1150,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var wizardController: WizardWindowController?
 
     init(session: DiffSession?, wizardGit: Git? = nil, paths: [String] = [],
+         noFetch: Bool = false,
          screenshotPath: String?, initialFileIndex: Int = 0,
          initialChangeJumps: Int = 0, autoConfirm: Bool = false,
          expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
+        self.noFetch = noFetch
         self.screenshotPath = screenshotPath
         self.initialFileIndex = initialFileIndex
         self.initialChangeJumps = initialChangeJumps
@@ -1168,7 +1171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let session = session {
             openMainWindow(session: session)
         } else if let git = wizardGit {
-            let wizard = WizardWindowController(git: git, paths: paths) { [weak self] session in
+            let wizard = WizardWindowController(git: git, paths: paths, noFetch: noFetch) { [weak self] session in
                 self?.openMainWindow(session: session)
             }
             wizardController = wizard

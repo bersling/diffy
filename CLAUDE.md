@@ -30,7 +30,7 @@
   as text; `--screenshot <png>` renders the window to a PNG and exits.
   More hidden test flags: `--select <n>`, `--change <n>`, `--expand-all`,
   `--collapse-folders`, `--appearance light|dark`, `--auto-confirm`,
-  `--two-dot`.
+  `--two-dot`, `--no-fetch`.
 - Test fixture: `/tmp/diffy-fixture` (master/develop, covers
   modify/add/delete/rename/binary/unicode/nested dirs, bare remote at
   /tmp/diffy-remote.git). Recreate if missing.
@@ -39,4 +39,7 @@
 
 - Comparisons default to **merge-base (triple-dot)**: never show commits the
   base branch is ahead by. `--two-dot` / `a..b` is the explicit opt-out.
+- Remote refs (`origin/...`) are **auto-fetched** before comparing (targeted,
+  per-branch); deleted-on-remote branches warn and are marked in the title.
+  The wizard fetches + prunes all remotes before listing. `--no-fetch` opts out.
 - Plain `diffy` opens the branch wizard; `diffy HEAD` is worktree-vs-HEAD.

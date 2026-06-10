@@ -17,7 +17,10 @@ EXAMPLES:
 
   Comparisons use the merge base by default (GitLab-MR semantics): commits
   the base branch is ahead by are NOT shown. To compare branch tips exactly:
-  diffy --two-dot master develop (or: diffy master..develop) under src/
+  diffy --two-dot master develop (or: diffy master..develop)
+
+  Remote refs (origin/...) are fetched automatically before comparing, so the
+  diff reflects the actual state on the remote. Skip with --no-fetch. under src/
 
 KEYS:
   n / p (or ⌘J / ⌘K)             next / previous change
@@ -25,6 +28,7 @@ KEYS:
 
 OPTIONS:
   --two-dot            compare tips exactly instead of using the merge base
+  --no-fetch           skip fetching; compare local snapshots of remote refs
   --dump               print the computed diff as text and exit (no GUI)
   --screenshot <path>  render the window to a PNG and exit
   -h, --help           show this help
@@ -48,6 +52,7 @@ var autoConfirm = false
 var expandAllOnLaunch = false
 var collapseFoldersOnLaunch = false
 var twoDot = false
+var noFetch = false
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -85,6 +90,8 @@ while i < args.count {
         expandAllOnLaunch = true
     } else if arg == "--two-dot" {
         twoDot = true
+    } else if arg == "--no-fetch" {
+        noFetch = true
     } else if arg == "--collapse-folders" {
         collapseFoldersOnLaunch = true
     } else if arg.hasPrefix("-") {
@@ -108,7 +115,7 @@ do {
         wizardGit = try Git(cwd: FileManager.default.currentDirectoryPath)
     } else {
         session = try DiffSession(cwd: FileManager.default.currentDirectoryPath,
-                                  refs: refs, paths: paths, twoDot: twoDot)
+                                  refs: refs, paths: paths, twoDot: twoDot, noFetch: noFetch)
     }
 } catch {
     fail("\(error)")
@@ -156,6 +163,7 @@ if let forced = forcedAppearance {
     app.appearance = NSAppearance(named: forced == "light" ? .aqua : .darkAqua)
 }
 let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
+                           noFetch: noFetch,
                            screenshotPath: screenshotPath,
                            initialFileIndex: initialFileIndex,
                            initialChangeJumps: initialChangeJumps,

@@ -120,6 +120,27 @@ final class Git {
             .filter { $0 != "\(remote)/HEAD" }
     }
 
+    enum FetchResult {
+        case ok
+        case deletedOnRemote
+        case failed(String)
+    }
+
+    /// Fetch a single branch (or everything) from a remote.
+    func fetch(remote: String, branch: String?, prune: Bool = false) -> FetchResult {
+        var args = ["fetch", "--quiet"]
+        if prune { args.append("--prune") }
+        args.append(remote)
+        if let branch = branch { args.append(branch) }
+        let r = run(args)
+        if r.status == 0 { return .ok }
+        let err = String(decoding: r.stderr, as: UTF8.self)
+        if err.contains("couldn't find remote ref") || err.contains("Couldn't find remote ref") {
+            return .deletedOnRemote
+        }
+        return .failed(err.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     func resolve(_ ref: String) -> String? {
         let r = run(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"])
         guard r.status == 0 else { return nil }
@@ -155,10 +176,50 @@ final class DiffSession {
     let git: Git
     let leftRef: String        // resolved left ref (e.g. merge-base sha for "a...b")
     let rightRef: String?      // nil = working tree
-    let leftLabel: String
-    let rightLabel: String
+    private(set) var leftLabel: String
+    private(set) var rightLabel: String
     let files: [ChangedFile]
     private var cache: [Int: FileDiff] = [:]
+
+    /// Fetches every `<remote>/<branch>` mentioned in the refs so the diff
+    /// reflects the actual state on the remote, not a stale local snapshot.
+    /// Returns refs whose branch no longer exists on the remote.
+    private static func fetchRemoteRefs(git: Git, refs: [String]) -> Set<String> {
+        var parts: [String] = []
+        for ref in refs {
+            if let r = ref.range(of: "...") {
+                parts.append(String(ref[..<r.lowerBound]))
+                parts.append(String(ref[r.upperBound...]))
+            } else if let r = ref.range(of: "..") {
+                parts.append(String(ref[..<r.lowerBound]))
+                parts.append(String(ref[r.upperBound...]))
+            } else {
+                parts.append(ref)
+            }
+        }
+        let remotes = Set(git.remotes())
+        var deleted: Set<String> = []
+        var seen: Set<String> = []
+        for part in parts {
+            guard let slash = part.firstIndex(of: "/") else { continue }
+            let remote = String(part[..<slash])
+            let branch = String(part[part.index(after: slash)...])
+            guard remotes.contains(remote), !branch.isEmpty, seen.insert(part).inserted else { continue }
+            FileHandle.standardError.write(Data("diffy: fetching \(part)…\n".utf8))
+            switch git.fetch(remote: remote, branch: branch) {
+            case .ok:
+                break
+            case .deletedOnRemote:
+                deleted.insert(part)
+                FileHandle.standardError.write(Data(
+                    "diffy: warning: '\(branch)' no longer exists on \(remote) — showing the last locally known state\n".utf8))
+            case .failed(let err):
+                FileHandle.standardError.write(Data(
+                    "diffy: warning: fetch of \(part) failed (offline?) — using local refs\n  \(err)\n".utf8))
+            }
+        }
+        return deleted
+    }
 
     /// Resolves the left side of a comparison. By default (`twoDot == false`)
     /// the left side is the merge base of base and target — GitLab-MR
@@ -177,8 +238,11 @@ final class DiffSession {
         return (mergeBase, "\(base) (merge base)")
     }
 
-    init(cwd: String, refs: [String], paths: [String], twoDot: Bool = false) throws {
+    init(cwd: String, refs: [String], paths: [String], twoDot: Bool = false,
+         noFetch: Bool = false) throws {
         self.git = try Git(cwd: cwd)
+
+        let deletedOnRemote = noFetch ? [] : DiffSession.fetchRemoteRefs(git: git, refs: refs)
 
         switch refs.count {
         case 0:
@@ -227,6 +291,11 @@ final class DiffSession {
             rightLabel = refs[1]
         default:
             throw GitError(message: "too many refs (expected at most 2)")
+        }
+
+        for ref in deletedOnRemote {
+            leftLabel = leftLabel.replacingOccurrences(of: ref, with: "\(ref) ⚠︎ deleted on remote")
+            rightLabel = rightLabel.replacingOccurrences(of: ref, with: "\(ref) ⚠︎ deleted on remote")
         }
 
         self.files = try git.changedFiles(leftRef: leftRef, rightRef: rightRef, paths: paths)

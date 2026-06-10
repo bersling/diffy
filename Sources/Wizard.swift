@@ -158,15 +158,27 @@ final class BranchPicker: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
 final class WizardWindowController: NSWindowController {
     private let git: Git
     private let paths: [String]
+    private let noFetch: Bool
     private let onConfirm: (DiffSession) -> Void
     private let sourcePicker: BranchPicker
     private let targetPicker: BranchPicker
     private let showButton = NSButton(title: "Show Diff", target: nil, action: nil)
 
-    init(git: Git, paths: [String], onConfirm: @escaping (DiffSession) -> Void) {
+    init(git: Git, paths: [String], noFetch: Bool = false,
+         onConfirm: @escaping (DiffSession) -> Void) {
         self.git = git
         self.paths = paths
+        self.noFetch = noFetch
         self.onConfirm = onConfirm
+
+        // Refresh remotes (with prune) so the branch lists reflect the actual
+        // remote state, not a stale local snapshot.
+        if !noFetch {
+            for remote in git.remotes() {
+                FileHandle.standardError.write(Data("diffy: fetching \(remote)…\n".utf8))
+                _ = git.fetch(remote: remote, branch: nil, prune: true)
+            }
+        }
 
         let locals = git.localBranches()
         var sourceGroups = [BranchPicker.Group(name: "local",
@@ -251,7 +263,9 @@ final class WizardWindowController: NSWindowController {
         guard let source = sourcePicker.selected, let target = targetPicker.selected else { return }
         let refs = source == BranchPicker.workingTree ? [target] : [target, source]
         do {
-            let session = try DiffSession(cwd: git.repoRoot, refs: refs, paths: paths)
+            // The wizard already fetched all remotes at startup.
+            let session = try DiffSession(cwd: git.repoRoot, refs: refs, paths: paths,
+                                          noFetch: true)
             if session.files.isEmpty {
                 let alert = NSAlert()
                 alert.messageText = "No differences"

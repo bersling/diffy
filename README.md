@@ -26,6 +26,11 @@ you only see changes made on the right-hand branch — commits the base branch
 is ahead by are never shown as phantom reverts. For an exact tip-vs-tip
 comparison use `diffy --two-dot master develop` (or `diffy master..develop`).
 
+Remote refs are **fetched automatically**: `diffy origin/a origin/b` fetches
+those branches first so the diff reflects the actual state on the remote, and
+warns if a branch was deleted there. The wizard fetches + prunes all remotes
+so its branch lists are live. Skip all fetching with `--no-fetch` (offline).
+
 ## Features
 
 - **Branch wizard** — plain `diffy` opens a picker: "Branch with diffs" and
