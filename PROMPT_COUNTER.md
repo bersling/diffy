@@ -4,9 +4,10 @@ How many human prompts it took to build diffy — a native macOS git diff viewer
 with side-by-side panes, intra-line highlights, a folder tree, a branch wizard,
 fold-away unchanged lines, a .pkg installer, and a GitHub repo.
 
-Count: 13
+Count: 14
 
-(Bumped automatically by a Claude Code hook on every prompt.)
+(Bumped automatically by a Claude Code hook on every prompt; every prompt is
+also logged below.)
 
 ## The prompts
 
@@ -18,3 +19,9 @@ Count: 13
 6. Would be cool if unchanged lines were collapsed (but expandable).
 7. Check for security vulnerabilities, then push everything to GitHub.
 8. Create this prompt counter.
+9. Is the counter hook active now? Did you commit and push?
+10. Triple-dot or double-dot comparison? Paramount to NOT show what the target branch is ahead by.
+11. Can we have a collapse/expand-all option for the folders in the sidebar?
+12. Commit and push — and always do that after every work item, security-checked (public repo). Save those instructions somewhere sensible.
+13. So the CLAUDE.md is also pushed?
+14. The counter only lists the first 8 prompts — list all of them, and remember to keep doing this.
