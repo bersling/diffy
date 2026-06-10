@@ -70,6 +70,10 @@ make dist           # universal binary, zipped (dist/diffy.zip) for sharing
 make pkg            # macOS installer (dist/diffy-1.0.pkg) with uninstaller
 ```
 
+If you share the raw binary from the zip (rather than the .pkg), the recipient
+must clear the download-quarantine flag once:
+`xattr -d com.apple.quarantine ./diffy`
+
 Or manually:
 
 ```sh
