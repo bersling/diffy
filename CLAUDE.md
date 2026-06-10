@@ -12,6 +12,14 @@
    - no hardcoded user-specific paths (`/Users/...`) or other private info
    - build artifacts stay out of git (`diffy` binary and `dist/` are
      gitignored — keep it that way)
+3. **Clean up after yourself before committing & pushing.** Remove anything
+   that was only needed to get the work done: debug prints/flags, scratch and
+   temp files, stale staging directories (e.g. `dist/diffy/` keeps old files
+   unless wiped — the dist target now does `rm -rf` first; keep it that way),
+   leftover test output, dead code from abandoned approaches. After the
+   security scan, also eyeball `git status` for files that shouldn't exist
+   and the diff for changes that shouldn't be in it.
+
 (The prompt-counter experiment was removed on request — don't reintroduce it.)
 
 ## Build & test

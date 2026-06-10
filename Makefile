@@ -18,6 +18,7 @@ clean:
 dist:
 	swiftc -O -swift-version 5 -target arm64-apple-macos11.0 -o /tmp/diffy-arm64 Sources/*.swift
 	swiftc -O -swift-version 5 -target x86_64-apple-macos11.0 -o /tmp/diffy-x86_64 Sources/*.swift
+	rm -rf dist/diffy
 	mkdir -p dist/diffy
 	lipo -create /tmp/diffy-arm64 /tmp/diffy-x86_64 -output dist/diffy/diffy
 	codesign -s - --force dist/diffy/diffy
