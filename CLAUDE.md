@@ -50,5 +50,9 @@
   Comments default to draft notes (review batching) published together via
   the Submit Review button; drafts are private, so create+delete is a safe
   E2E test. bulk_publish is the only untested-live call.
+  @mentions: comment dialog autocompletes project members (/members/all);
+  test flags --test-mention <q> (match logic) and --test-mention-ui <png>
+  (popover render, composites child windows since CGWindowListCreateImage
+  is gone in macOS 15).
   Token discovery: $DIFFY_GITLAB_TOKEN → ~/.config/diffy/gitlab-token →
   gitlab MCP entries in ~/.claude.json → $GITLAB_TOKEN (401s skip to next).

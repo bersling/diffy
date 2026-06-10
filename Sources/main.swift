@@ -60,6 +60,7 @@ var collapseFoldersOnLaunch = false
 var twoDot = false
 var noFetch = false
 var copyLinesRange: ClosedRange<Int>? = nil
+var mentionUITestPath: String? = nil
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -99,6 +100,25 @@ while i < args.count {
         twoDot = true
     } else if arg == "--no-fetch" {
         noFetch = true
+    } else if arg == "--test-mention" {
+        // Headless self-test of @mention prefix matching.
+        i += 1
+        guard i < args.count else { fail("--test-mention requires a query") }
+        let sample = [
+            GitLabUser(username: "jost", name: "Jost Joller"),
+            GitLabUser(username: "portmann", name: "Samuel Portmann"),
+            GitLabUser(username: "jo", name: "Jo Helmuth"),
+            GitLabUser(username: "zeljko", name: "Zeljko Antic"),
+            GitLabUser(username: "sniederhauser", name: "Stefan Niederhauser"),
+        ]
+        for u in MentionTextView.match(sample, prefix: args[i]) {
+            print("@\(u.username)  \(u.name)")
+        }
+        exit(0)
+    } else if arg == "--test-mention-ui" {
+        i += 1
+        guard i < args.count else { fail("--test-mention-ui requires a PNG path") }
+        mentionUITestPath = args[i]
     } else if arg == "--collapse-folders" {
         collapseFoldersOnLaunch = true
     } else if arg == "--copy-lines" {
@@ -113,6 +133,20 @@ while i < args.count {
         refs.append(arg)
     }
     i += 1
+}
+
+// MARK: - @mention popup UI test (headless screenshot)
+
+if let path = mentionUITestPath {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    if let forced = forcedAppearance {
+        app.appearance = NSAppearance(named: forced == "light" ? .aqua : .darkAqua)
+    }
+    let delegate = MentionUITestDelegate(screenshotPath: path)
+    app.delegate = delegate
+    app.run()
+    exit(0)
 }
 
 // MARK: - Build session (or defer to the branch wizard)
@@ -152,7 +186,9 @@ do {
                                 labels: ("\(mr.targetBranch) (MR base)", mr.sourceBranch))
         let threads = try client.fetchDiscussions()
         let drafts = (try? client.fetchDraftNotes()) ?? []
-        s.mr = MRContext(client: client, mr: mr, threads: threads, drafts: drafts)
+        let context = MRContext(client: client, mr: mr, threads: threads, drafts: drafts)
+        context.loadMembersAsync()
+        s.mr = context
         session = s
     } else if wizardMode {
         wizardGit = try Git(cwd: FileManager.default.currentDirectoryPath)

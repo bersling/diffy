@@ -49,6 +49,9 @@ private drafts — shown as orange *Pending* cards with a Discard button — unt
 you publish them all at once with the **Submit Review (N)** button in the
 header. "Send Now" posts immediately instead.
 
+Type **`@`** in any comment to autocomplete project members (↑/↓ to navigate,
+Enter/Tab/click to insert), so mentions notify the right people on GitLab.
+
 The token is auto-discovered (first match wins, invalid tokens are skipped):
 `$DIFFY_GITLAB_TOKEN` → `~/.config/diffy/gitlab-token` → any gitlab MCP server
 in `~/.claude.json` → `$GITLAB_TOKEN` / `$GITLAB_PERSONAL_ACCESS_TOKEN`.

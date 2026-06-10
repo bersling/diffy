@@ -70,6 +70,11 @@ struct MRDraft {
     let discussionID: String?  // set when the draft replies to a thread
 }
 
+struct GitLabUser {
+    let username: String
+    let name: String
+}
+
 struct GitLabError: Error, CustomStringConvertible {
     let message: String
     var description: String { message }
@@ -343,6 +348,29 @@ final class GitLabClient {
                         path: "/merge_requests/\(ref.iid)/draft_notes/\(id)")
     }
 
+    // MARK: members (for @mentions)
+
+    /// Project members including inherited ones; falls back gracefully on error.
+    func fetchMembers() -> [GitLabUser] {
+        var users: [GitLabUser] = []
+        var seen = Set<String>()
+        var page = 1
+        while page <= 5 {
+            guard let data = try? request(method: "GET", path: "/members/all",
+                                          query: ["per_page": "100", "page": "\(page)"]),
+                  let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                break
+            }
+            for item in items {
+                guard let username = item["username"] as? String, seen.insert(username).inserted else { continue }
+                users.append(GitLabUser(username: username, name: item["name"] as? String ?? username))
+            }
+            if items.count < 100 { break }
+            page += 1
+        }
+        return users.sorted { $0.username.lowercased() < $1.username.lowercased() }
+    }
+
     func postThread(mr: GitLabMR, body: String, position: MRPosition) throws {
         var pos: [String: Any] = [
             "position_type": "text",
@@ -367,12 +395,22 @@ final class MRContext {
     let mr: GitLabMR
     var threads: [MRThread]
     var drafts: [MRDraft]
+    var members: [GitLabUser] = []
 
     init(client: GitLabClient, mr: GitLabMR, threads: [MRThread], drafts: [MRDraft]) {
         self.client = client
         self.mr = mr
         self.threads = threads
         self.drafts = drafts
+    }
+
+    /// Loads project members in the background for @mention autocomplete.
+    func loadMembersAsync() {
+        DispatchQueue.global().async { [weak self] in
+            guard let self = self else { return }
+            let members = self.client.fetchMembers()
+            DispatchQueue.main.async { self.members = members }
+        }
     }
 
     func refresh() {

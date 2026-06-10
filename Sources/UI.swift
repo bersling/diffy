@@ -300,6 +300,227 @@ final class FoldRowView: NSView {
     }
 }
 
+// MARK: - @mention autocomplete
+
+/// Text view that shows an @-mention completion popup. NSTextView's built-in
+/// completion is keyed to whole words and clunky for this; a small custom
+/// dropdown is simpler and matches the GitLab UX.
+final class MentionTextView: NSTextView, NSTableViewDelegate, NSTableViewDataSource {
+    var members: [GitLabUser] = []
+
+    private var popover: NSWindow?
+    private let menuTable = NSTableView()
+    private var matches: [GitLabUser] = []
+    private var mentionStart: Int?   // UTF-16 offset of the '@'
+
+    override func keyDown(with event: NSEvent) {
+        if popover != nil {
+            switch event.keyCode {
+            case 125:  // down
+                moveSelection(1); return
+            case 126:  // up
+                moveSelection(-1); return
+            case 36, 48:  // return, tab
+                acceptSelection(); return
+            case 53:  // escape
+                dismiss(); return
+            default:
+                break
+            }
+        }
+        super.keyDown(with: event)
+        updateMentionState()
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        updateMentionState()
+    }
+
+    /// Test hook: re-run mention detection after setting text programmatically.
+    func triggerMentionForTest() { updateMentionState() }
+
+    override func resignFirstResponder() -> Bool {
+        dismiss()
+        return super.resignFirstResponder()
+    }
+
+    /// Detects an `@token` ending at the caret and shows/updates the popup.
+    private func updateMentionState() {
+        guard !members.isEmpty, let text = string as NSString?,
+              selectedRange().length == 0 else { dismiss(); return }
+        let caret = selectedRange().location
+        var i = caret
+        while i > 0 {
+            let c = text.character(at: i - 1)
+            let scalar = Unicode.Scalar(c)
+            if c == UInt16(UnicodeScalar("@").value) {
+                let prefix = text.substring(with: NSRange(location: i, length: caret - i))
+                // Only trigger at start or after whitespace/'('.
+                if i >= 2 {
+                    let before = text.character(at: i - 2)
+                    let bs = Unicode.Scalar(before)!
+                    if !CharacterSet.whitespacesAndNewlines.contains(bs) && before != UInt16(UnicodeScalar("(").value) {
+                        dismiss(); return
+                    }
+                }
+                showMatches(forPrefix: prefix, mentionAt: i - 1)
+                return
+            }
+            // mention tokens are word chars only
+            if let s = scalar, CharacterSet.alphanumerics.contains(s) || c == UInt16(UnicodeScalar("_").value)
+                || c == UInt16(UnicodeScalar("-").value) || c == UInt16(UnicodeScalar(".").value) {
+                i -= 1
+            } else {
+                break
+            }
+        }
+        dismiss()
+    }
+
+    /// Filters members for an @-mention prefix: username-prefix matches first,
+    /// then name-substring matches. Username matches rank above name matches.
+    static func match(_ members: [GitLabUser], prefix: String, limit: Int = 8) -> [GitLabUser] {
+        let lower = prefix.lowercased()
+        if lower.isEmpty { return Array(members.prefix(limit)) }
+        var byUsername: [GitLabUser] = []
+        var byName: [GitLabUser] = []
+        for m in members {
+            if m.username.lowercased().hasPrefix(lower) {
+                byUsername.append(m)
+            } else if m.name.lowercased().contains(lower) {
+                byName.append(m)
+            }
+        }
+        return Array((byUsername + byName).prefix(limit))
+    }
+
+    private func showMatches(forPrefix prefix: String, mentionAt: Int) {
+        matches = MentionTextView.match(members, prefix: prefix)
+        guard !matches.isEmpty else { dismiss(); return }
+        mentionStart = mentionAt
+        presentPopover()
+    }
+
+    private func presentPopover() {
+        let rowHeight: CGFloat = 22
+        let height = CGFloat(matches.count) * rowHeight + 2
+        let width: CGFloat = 260
+
+        let popover: NSWindow
+        if let existing = self.popover {
+            popover = existing
+        } else {
+            popover = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                               styleMask: [.borderless], backing: .buffered, defer: true)
+            popover.backgroundColor = .clear
+            popover.isOpaque = false
+            popover.hasShadow = true
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+            scroll.drawsBackground = true
+            scroll.backgroundColor = .controlBackgroundColor
+            scroll.borderType = .lineBorder
+            scroll.hasVerticalScroller = false
+            if menuTable.tableColumns.isEmpty {
+                let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("m"))
+                col.width = width - 4
+                menuTable.addTableColumn(col)
+                menuTable.headerView = nil
+                menuTable.rowHeight = rowHeight
+                menuTable.backgroundColor = .controlBackgroundColor
+                menuTable.dataSource = self
+                menuTable.delegate = self
+                menuTable.action = #selector(rowClicked)
+                menuTable.target = self
+            }
+            scroll.documentView = menuTable
+            popover.contentView = scroll
+            self.popover = popover
+        }
+        popover.setContentSize(NSSize(width: width, height: height))
+        menuTable.reloadData()
+        if menuTable.selectedRow < 0 || menuTable.selectedRow >= matches.count {
+            menuTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+
+        // Position below the caret.
+        if let start = mentionStart, let lm = layoutManager, let tc = textContainer {
+            let glyph = lm.glyphIndexForCharacter(at: start)
+            var rect = lm.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: tc)
+            rect.origin.x += textContainerOrigin.x
+            rect.origin.y += textContainerOrigin.y
+            if let screenRect = window?.convertToScreen(convert(rect, to: nil)) {
+                popover.setFrameTopLeftPoint(NSPoint(x: screenRect.minX, y: screenRect.minY - 2))
+            }
+        }
+        if popover.parent == nil {
+            window?.addChildWindow(popover, ordered: .above)
+        }
+    }
+
+    private func moveSelection(_ delta: Int) {
+        let next = max(0, min(matches.count - 1, menuTable.selectedRow + delta))
+        menuTable.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
+        menuTable.scrollRowToVisible(next)
+    }
+
+    @objc private func rowClicked() { acceptSelection() }
+
+    private func acceptSelection() {
+        let row = menuTable.selectedRow
+        guard row >= 0, row < matches.count, let start = mentionStart else { dismiss(); return }
+        let caret = selectedRange().location
+        let replaceRange = NSRange(location: start, length: caret - start)
+        let insertion = "@\(matches[row].username) "
+        if shouldChangeText(in: replaceRange, replacementString: insertion) {
+            textStorage?.replaceCharacters(in: replaceRange, with: insertion)
+            didChangeText()
+            setSelectedRange(NSRange(location: start + (insertion as NSString).length, length: 0))
+        }
+        dismiss()
+    }
+
+    private func dismiss() {
+        if let popover = popover {
+            window?.removeChildWindow(popover)
+            popover.orderOut(nil)
+        }
+        popover = nil
+        mentionStart = nil
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { matches.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let id = NSUserInterfaceItemIdentifier("mcell")
+        let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? {
+            let c = NSTableCellView()
+            c.identifier = id
+            let label = NSTextField(labelWithString: "")
+            label.translatesAutoresizingMaskIntoConstraints = false
+            c.addSubview(label)
+            c.textField = label
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -6),
+                label.centerYAnchor.constraint(equalTo: c.centerYAnchor),
+            ])
+            return c
+        }()
+        let user = matches[row]
+        let s = NSMutableAttributedString(string: "@\(user.username)",
+            attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium),
+                         .foregroundColor: NSColor.labelColor])
+        s.append(NSAttributedString(string: "  \(user.name)",
+            attributes: [.font: NSFont.systemFont(ofSize: 11),
+                         .foregroundColor: NSColor.secondaryLabelColor]))
+        cell.textField?.attributedStringValue = s
+        return cell
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { true }
+}
+
 // MARK: - Review comment rows
 
 final class CommentRowView: NSView {
@@ -1453,7 +1674,8 @@ final class ContentViewController: NSViewController {
         alert.addButton(withTitle: "Send Now")
         alert.addButton(withTitle: "Cancel")
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 380, height: 100))
-        let textView = NSTextView(frame: scroll.bounds)
+        let textView = MentionTextView(frame: scroll.bounds)
+        textView.members = session.mr?.members ?? []
         textView.font = NSFont.systemFont(ofSize: 12)
         textView.isRichText = false
         textView.allowsUndo = true
@@ -1699,6 +1921,79 @@ final class MainWindowController: NSWindowController {
         let target = contentVC.currentIndex + offset
         guard target >= 0 && target < session.files.count else { return }
         sidebarVC.selectFile(at: target)
+    }
+}
+
+// MARK: - @mention popup UI test delegate
+
+final class MentionUITestDelegate: NSObject, NSApplicationDelegate {
+    let screenshotPath: String
+    var window: NSWindow?
+    var textView: MentionTextView?
+
+    init(screenshotPath: String) { self.screenshotPath = screenshotPath }
+
+    /// Composites the main window and any child windows (the popover) into one
+    /// PNG, positioned by their screen frames. (CGWindowListCreateImage is
+    /// gone in macOS 15 and ScreenCaptureKit needs entitlements/async.)
+    private func captureCompositing(window: NSWindow) {
+        var windows: [NSWindow] = [window]
+        windows.append(contentsOf: window.childWindows ?? [])
+        let union = windows.reduce(NSRect.null) { $0.union($1.frame) }
+        guard !union.isEmpty,
+              let combined = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int(union.width), pixelsHigh: Int(union.height),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: combined)
+        for win in windows {
+            guard let view = win.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            // window frames are bottom-left origin; flip into the combined rep
+            let x = win.frame.minX - union.minX
+            let y = union.maxY - win.frame.maxY
+            rep.draw(in: NSRect(x: x, y: y, width: win.frame.width, height: win.frame.height))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        if let png = combined.representation(using: .png, properties: [:]) {
+            try? png.write(to: URL(fileURLWithPath: screenshotPath))
+        }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "diffy — @mention test"
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 20, width: 380, height: 160))
+        let tv = MentionTextView(frame: scroll.bounds)
+        tv.members = [
+            GitLabUser(username: "jost", name: "Jost Joller"),
+            GitLabUser(username: "jo", name: "Jo Helmuth"),
+            GitLabUser(username: "portmann", name: "Samuel Portmann"),
+            GitLabUser(username: "sniederhauser", name: "Stefan Niederhauser"),
+        ]
+        tv.font = NSFont.systemFont(ofSize: 13)
+        tv.string = "Looks good, @jo"
+        scroll.documentView = tv
+        scroll.borderType = .bezelBorder
+        window.contentView?.addSubview(scroll)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        self.window = window
+        self.textView = tv
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            tv.window?.makeFirstResponder(tv)
+            tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
+            tv.triggerMentionForTest()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                self.captureCompositing(window: window)
+                NSApp.terminate(nil)
+            }
+        }
     }
 }
 
