@@ -1337,6 +1337,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource,
     @objc func collapseAllAction(_ sender: Any?) { collapseAll() }
 
     /// Test hook: drive the filter as if typed into the search field.
+    func focusSearchFieldForTest() {
+        view.window?.makeFirstResponder(searchField)
+    }
+
     func applyFilterForTest(_ query: String) {
         searchField.stringValue = query
         applyFilter(query)
@@ -1997,9 +2001,21 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    /// Test hook: would the global letter shortcut be intercepted right now?
+    /// Returns false when a text responder is focused (so typing works).
+    func shortcutWouldInterceptForTest() -> Bool {
+        !(window?.firstResponder is NSText)
+    }
+
     private func handleKey(_ event: NSEvent) -> Bool {
         guard event.window === window else { return false }
         if event.modifierFlags.intersection([.command, .option, .control]).isEmpty == false {
+            return false
+        }
+        // Don't steal letter shortcuts while the user is typing in a text field
+        // or text view (filter field, comment dialog, @mention entry). A focused
+        // field's editor is an NSTextView, so this covers NSSearchField too.
+        if window?.firstResponder is NSText {
             return false
         }
         let f7 = String(UnicodeScalar(NSF7FunctionKey)!)
@@ -2223,6 +2239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let copyLinesRange: ClosedRange<Int>?
     let fileFilterQuery: String?
     let showCommentsOnLaunch: Bool
+    let testShortcutGuard: Bool
     var windowController: MainWindowController?
     var wizardController: WizardWindowController?
 
@@ -2232,7 +2249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          initialChangeJumps: Int = 0, autoConfirm: Bool = false,
          expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false,
          copyLinesRange: ClosedRange<Int>? = nil, fileFilterQuery: String? = nil,
-         showCommentsOnLaunch: Bool = false) {
+         showCommentsOnLaunch: Bool = false, testShortcutGuard: Bool = false) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
@@ -2246,6 +2263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.copyLinesRange = copyLinesRange
         self.fileFilterQuery = fileFilterQuery
         self.showCommentsOnLaunch = showCommentsOnLaunch
+        self.testShortcutGuard = testShortcutGuard
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2299,6 +2317,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 wc.contentVC.showAllCommentsForTest()
             }
+        }
+        if testShortcutGuard {
+            // Verify the global n/p/[/] shortcuts yield to text typing.
+            print("diff focused → intercept:", wc.shortcutWouldInterceptForTest())
+            wc.sidebarVC.focusSearchFieldForTest()
+            print("search focused → intercept:", wc.shortcutWouldInterceptForTest())
+            NSApp.terminate(nil)
         }
         if let range = copyLinesRange {
             // Headless test path: select rows in the right pane, copy, print.

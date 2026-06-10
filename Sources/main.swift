@@ -63,6 +63,7 @@ var copyLinesRange: ClosedRange<Int>? = nil
 var mentionUITestPath: String? = nil
 var fileFilterQuery: String? = nil
 var showCommentsOnLaunch = false
+var testShortcutGuard = false
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -127,6 +128,8 @@ while i < args.count {
         fileFilterQuery = args[i]
     } else if arg == "--show-comments" {
         showCommentsOnLaunch = true
+    } else if arg == "--test-shortcut-guard" {
+        testShortcutGuard = true
     } else if arg == "--collapse-folders" {
         collapseFoldersOnLaunch = true
     } else if arg == "--copy-lines" {
@@ -259,6 +262,7 @@ let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
                            collapseFoldersOnLaunch: collapseFoldersOnLaunch,
                            copyLinesRange: copyLinesRange,
                            fileFilterQuery: fileFilterQuery,
-                           showCommentsOnLaunch: showCommentsOnLaunch)
+                           showCommentsOnLaunch: showCommentsOnLaunch,
+                           testShortcutGuard: testShortcutGuard)
 app.delegate = delegate
 app.run()
