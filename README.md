@@ -31,7 +31,8 @@ comparison use `diffy --two-dot master develop` (or `diffy master..develop`).
 - **Branch wizard** — plain `diffy` opens a picker: "Branch with diffs" and
   "Target branch", each with a local/remote toggle and live search
 - **Collapsible folder tree** sidebar with status badges (A/M/D/R/C/T), file
-  counts per folder, and compressed single-child directory chains
+  counts per folder, compressed single-child directory chains, and
+  collapse-all / expand-all buttons (also ⌥⌘← / ⌥⌘→)
 - **Side-by-side panes** with synchronized vertical scrolling and aligned rows
 - **Intra-line highlights** — the changed part of a modified line is emphasized,
   IntelliJ-style (blue = modified, green = added, red = deleted)
@@ -50,6 +51,7 @@ comparison use `diffy --two-dot master develop` (or `diffy master..develop`).
 | `n` / `p` (or `F7` / `⇧F7`, or `⌘J` / `⌘K`) | next / previous change |
 | `]` / `[` (or `⌘↓` / `⌘↑`) | next / previous file |
 | `⌘E` | expand all unchanged lines |
+| `⌥⌘←` / `⌥⌘→` | collapse / expand all folders |
 | `↑` / `↓` in the sidebar | switch files |
 | `⌘W` / `⌘Q` | close / quit |
 

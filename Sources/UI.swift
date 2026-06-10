@@ -413,6 +413,7 @@ final class FileNode {
     let name: String
     var children: [FileNode] = []
     var fileIndex: Int?  // nil = directory
+    weak var parent: FileNode?
     var isDir: Bool { fileIndex == nil }
 
     init(name: String, fileIndex: Int? = nil) {
@@ -464,6 +465,14 @@ final class FileNode {
             }
         }
         sortAndCompress(root)
+
+        func assignParents(_ node: FileNode) {
+            for child in node.children {
+                child.parent = node
+                assignParents(child)
+            }
+        }
+        assignParents(root)
         return (root, byIndex)
     }
 }
@@ -596,9 +605,66 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
-        self.view = scroll
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+
+        // Header: file count + collapse/expand-all buttons
+        let countLabel = NSTextField(labelWithString:
+            "\(session.files.count) file\(session.files.count == 1 ? "" : "s")")
+        countLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        countLabel.textColor = .secondaryLabelColor
+
+        func treeButton(_ symbol: String, fallback: String, action: Selector, tooltip: String) -> NSButton {
+            let b = NSButton()
+            if #available(macOS 11.0, *),
+               let img = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip) {
+                b.image = img
+            } else {
+                b.title = fallback
+            }
+            b.bezelStyle = .texturedRounded
+            b.isBordered = false
+            b.target = self
+            b.action = action
+            b.toolTip = tooltip
+            return b
+        }
+        let collapseButton = treeButton("chevron.right.square", fallback: "▸▸",
+                                        action: #selector(collapseAllAction(_:)),
+                                        tooltip: "Collapse All Folders (⌥⌘←)")
+        let expandButton = treeButton("chevron.down.square", fallback: "▾▾",
+                                      action: #selector(expandAllAction(_:)),
+                                      tooltip: "Expand All Folders (⌥⌘→)")
+
+        let headerStack = NSStackView(views: [countLabel, NSView(), collapseButton, expandButton])
+        headerStack.orientation = .horizontal
+        headerStack.spacing = 6
+        headerStack.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        let root = BackgroundView()
+        root.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(headerStack)
+        root.addSubview(separator)
+        root.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            headerStack.topAnchor.constraint(equalTo: root.topAnchor),
+            headerStack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            headerStack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            headerStack.heightAnchor.constraint(equalToConstant: 28),
+            separator.topAnchor.constraint(equalTo: headerStack.bottomAnchor),
+            separator.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+        ])
+        self.view = root
     }
 
     override func viewDidLoad() {
@@ -613,8 +679,27 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         }
     }
 
+    func collapseAll() {
+        for child in root.children {
+            outline.collapseItem(child, collapseChildren: true)
+        }
+    }
+
+    @objc func expandAllAction(_ sender: Any?) { expandAll() }
+    @objc func collapseAllAction(_ sender: Any?) { collapseAll() }
+
     func selectFile(at index: Int) {
         guard let node = nodeByFileIndex[index] else { return }
+        // Expand collapsed ancestors so the row exists, topmost first.
+        var ancestors: [FileNode] = []
+        var p = node.parent
+        while let cur = p, cur !== root {
+            ancestors.append(cur)
+            p = cur.parent
+        }
+        for ancestor in ancestors.reversed() {
+            outline.expandItem(ancestor)
+        }
         let row = outline.row(forItem: node)
         guard row >= 0 else { return }
         outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -1036,6 +1121,8 @@ final class MainWindowController: NSWindowController {
     @objc func nextChangeAction(_ sender: Any?) { contentVC.nextChange(sender) }
     @objc func prevChangeAction(_ sender: Any?) { contentVC.prevChange(sender) }
     @objc func expandAllAction(_ sender: Any?) { contentVC.expandAllFolds(sender) }
+    @objc func expandAllFoldersAction(_ sender: Any?) { sidebarVC.expandAll() }
+    @objc func collapseAllFoldersAction(_ sender: Any?) { sidebarVC.collapseAll() }
     @objc func nextFileAction(_ sender: Any?) { selectFile(offset: 1) }
     @objc func prevFileAction(_ sender: Any?) { selectFile(offset: -1) }
 
@@ -1057,13 +1144,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let initialChangeJumps: Int
     let autoConfirm: Bool
     let expandAllOnLaunch: Bool
+    let collapseFoldersOnLaunch: Bool
     var windowController: MainWindowController?
     var wizardController: WizardWindowController?
 
     init(session: DiffSession?, wizardGit: Git? = nil, paths: [String] = [],
          screenshotPath: String?, initialFileIndex: Int = 0,
          initialChangeJumps: Int = 0, autoConfirm: Bool = false,
-         expandAllOnLaunch: Bool = false) {
+         expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
@@ -1072,6 +1160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.initialChangeJumps = initialChangeJumps
         self.autoConfirm = autoConfirm
         self.expandAllOnLaunch = expandAllOnLaunch
+        self.collapseFoldersOnLaunch = collapseFoldersOnLaunch
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1113,6 +1202,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if expandAllOnLaunch {
             wc.contentVC.expandAllFolds(nil)
+        }
+        if collapseFoldersOnLaunch {
+            wc.sidebarVC.collapseAll()
         }
         if let wizard = wizardController {
             wizardController = nil
@@ -1158,7 +1250,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let expandAll = NSMenuItem(title: "Expand Unchanged Lines",
                                    action: #selector(MainWindowController.expandAllAction(_:)),
                                    keyEquivalent: "e")
-        for item in [nextChange, prevChange, nextFile, prevFile, .separator(), expandAll] {
+        let expandFolders = NSMenuItem(title: "Expand All Folders",
+                                       action: #selector(MainWindowController.expandAllFoldersAction(_:)),
+                                       keyEquivalent: String(UnicodeScalar(NSRightArrowFunctionKey)!))
+        expandFolders.keyEquivalentModifierMask = [.command, .option]
+        let collapseFolders = NSMenuItem(title: "Collapse All Folders",
+                                         action: #selector(MainWindowController.collapseAllFoldersAction(_:)),
+                                         keyEquivalent: String(UnicodeScalar(NSLeftArrowFunctionKey)!))
+        collapseFolders.keyEquivalentModifierMask = [.command, .option]
+        for item in [nextChange, prevChange, nextFile, prevFile, .separator(),
+                     expandAll, .separator(), expandFolders, collapseFolders] {
             navMenu.addItem(item)
         }
         navMenuItem.submenu = navMenu

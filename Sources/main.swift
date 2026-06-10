@@ -46,6 +46,7 @@ var initialChangeJumps = 0
 var forcedAppearance: String? = nil
 var autoConfirm = false
 var expandAllOnLaunch = false
+var collapseFoldersOnLaunch = false
 var twoDot = false
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -84,6 +85,8 @@ while i < args.count {
         expandAllOnLaunch = true
     } else if arg == "--two-dot" {
         twoDot = true
+    } else if arg == "--collapse-folders" {
+        collapseFoldersOnLaunch = true
     } else if arg.hasPrefix("-") {
         fail("unknown option: \(arg)\n\n\(usage)")
     } else {
@@ -157,6 +160,7 @@ let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
                            initialFileIndex: initialFileIndex,
                            initialChangeJumps: initialChangeJumps,
                            autoConfirm: autoConfirm,
-                           expandAllOnLaunch: expandAllOnLaunch)
+                           expandAllOnLaunch: expandAllOnLaunch,
+                           collapseFoldersOnLaunch: collapseFoldersOnLaunch)
 app.delegate = delegate
 app.run()
