@@ -1,0 +1,156 @@
+import AppKit
+import Foundation
+
+let usage = """
+diffy — native macOS side-by-side diff viewer for git
+
+USAGE:
+  diffy [options] [<ref> [<ref>]] [-- <path>...]
+
+EXAMPLES:
+  diffy                          open the branch-selection wizard
+  diffy HEAD                     HEAD vs working tree
+  diffy master                   master vs working tree
+  diffy master develop           master vs develop
+  diffy origin/master origin/develop
+  diffy master..develop          same as: diffy master develop
+  diffy master...develop         merge-base(master, develop) vs develop
+  diffy master develop -- src/   limit to paths under src/
+
+KEYS:
+  n / p (or ⌘J / ⌘K)             next / previous change
+  ] / [ (or ⌘↓ / ⌘↑)             next / previous file
+
+OPTIONS:
+  --dump               print the computed diff as text and exit (no GUI)
+  --screenshot <path>  render the window to a PNG and exit
+  -h, --help           show this help
+"""
+
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("diffy: \(message)\n".utf8))
+    exit(1)
+}
+
+// MARK: - Parse arguments
+
+var refs: [String] = []
+var paths: [String] = []
+var dumpMode = false
+var screenshotPath: String? = nil
+var initialFileIndex = 0
+var initialChangeJumps = 0
+var forcedAppearance: String? = nil
+var autoConfirm = false
+var expandAllOnLaunch = false
+
+var args = Array(CommandLine.arguments.dropFirst())
+var afterDoubleDash = false
+var i = 0
+while i < args.count {
+    let arg = args[i]
+    if afterDoubleDash {
+        paths.append(arg)
+    } else if arg == "--" {
+        afterDoubleDash = true
+    } else if arg == "-h" || arg == "--help" {
+        print(usage)
+        exit(0)
+    } else if arg == "--dump" {
+        dumpMode = true
+    } else if arg == "--screenshot" {
+        i += 1
+        guard i < args.count else { fail("--screenshot requires a path") }
+        screenshotPath = args[i]
+    } else if arg == "--select" {
+        i += 1
+        guard i < args.count, let n = Int(args[i]) else { fail("--select requires a number") }
+        initialFileIndex = n
+    } else if arg == "--change" {
+        i += 1
+        guard i < args.count, let n = Int(args[i]) else { fail("--change requires a number") }
+        initialChangeJumps = n
+    } else if arg == "--appearance" {
+        i += 1
+        guard i < args.count else { fail("--appearance requires light or dark") }
+        forcedAppearance = args[i]
+    } else if arg == "--auto-confirm" {
+        autoConfirm = true
+    } else if arg == "--expand-all" {
+        expandAllOnLaunch = true
+    } else if arg.hasPrefix("-") {
+        fail("unknown option: \(arg)\n\n\(usage)")
+    } else {
+        refs.append(arg)
+    }
+    i += 1
+}
+
+// MARK: - Build session (or defer to the branch wizard)
+
+// Plain `diffy` opens the branch-selection wizard; `diffy HEAD` etc. go
+// straight to the viewer. Dump mode keeps HEAD-vs-worktree for scripting.
+let wizardMode = refs.isEmpty && !dumpMode
+
+var session: DiffSession? = nil
+var wizardGit: Git? = nil
+do {
+    if wizardMode {
+        wizardGit = try Git(cwd: FileManager.default.currentDirectoryPath)
+    } else {
+        session = try DiffSession(cwd: FileManager.default.currentDirectoryPath,
+                                  refs: refs, paths: paths)
+    }
+} catch {
+    fail("\(error)")
+}
+
+if let session = session, session.files.isEmpty {
+    print("diffy: no differences between \(session.leftLabel) and \(session.rightLabel)")
+    exit(0)
+}
+
+// MARK: - Dump mode (headless, for testing/scripting)
+
+if dumpMode, let session = session {
+    print("== \(session.title) — \(session.files.count) changed file(s) ==")
+    for (idx, file) in session.files.enumerated() {
+        let diff = session.fileDiff(at: idx)
+        let pathDesc = file.status == .renamed || file.status == .copied
+            ? "\(file.oldPath) -> \(file.newPath)"
+            : file.displayPath
+        print("\n[\(file.status.letter)] \(pathDesc)  (+\(diff.additions) -\(diff.deletions))\(diff.isBinary ? " [binary]" : "")")
+        for row in diff.rows {
+            let kindChar: String
+            switch row.kind {
+            case .context: kindChar = " "
+            case .addition: kindChar = "+"
+            case .deletion: kindChar = "-"
+            case .modification: kindChar = "~"
+            case .message: kindChar = "!"
+            }
+            let ln = row.left.map { String(format: "%4d", $0.number) } ?? "    "
+            let rn = row.right.map { String(format: "%4d", $0.number) } ?? "    "
+            let lt = row.left?.text ?? ""
+            let rt = row.right?.text ?? ""
+            print("\(kindChar) \(ln) | \(lt.padding(toLength: min(max(lt.count, 38), 38), withPad: " ", startingAt: 0)) || \(rn) | \(rt)")
+        }
+    }
+    exit(0)
+}
+
+// MARK: - Launch GUI
+
+let app = NSApplication.shared
+app.setActivationPolicy(.regular)
+if let forced = forcedAppearance {
+    app.appearance = NSAppearance(named: forced == "light" ? .aqua : .darkAqua)
+}
+let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
+                           screenshotPath: screenshotPath,
+                           initialFileIndex: initialFileIndex,
+                           initialChangeJumps: initialChangeJumps,
+                           autoConfirm: autoConfirm,
+                           expandAllOnLaunch: expandAllOnLaunch)
+app.delegate = delegate
+app.run()

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="1">
+    <title>diffy — git diff viewer</title>
+    <readme file="readme.html"/>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <domains enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.taskbase.diffy"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.taskbase.diffy" visible="false">
+        <pkg-ref id="com.taskbase.diffy"/>
+    </choice>
+    <pkg-ref id="com.taskbase.diffy" version="1.0" onConclusion="none">diffy-component.pkg</pkg-ref>
+</installer-gui-script>

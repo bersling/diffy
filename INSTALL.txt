@@ -1,0 +1,36 @@
+diffy — native macOS side-by-side git diff viewer
+===================================================
+
+Works on macOS 11+ (Apple Silicon and Intel).
+
+INSTALL
+-------
+Open Terminal in this folder and run:
+
+    xattr -d com.apple.quarantine ./diffy 2>/dev/null
+    mkdir -p ~/.local/bin && cp ./diffy ~/.local/bin/
+
+(The xattr line removes the "downloaded from the internet" flag so macOS
+lets the unsigned binary run. If ~/.local/bin is not on your PATH, copy it
+to /usr/local/bin instead, or add  export PATH="$HOME/.local/bin:$PATH"
+to your ~/.zshrc.)
+
+USE
+---
+Run inside any git repository:
+
+    diffy                              # branch-selection wizard
+    diffy HEAD                         # HEAD vs working tree
+    diffy master                       # master vs working tree
+    diffy master develop               # branch vs branch
+    diffy origin/master origin/develop
+    diffy master...develop             # merge-base semantics (like a GitLab MR)
+    diffy master develop -- src/       # limit to paths
+
+KEYS
+----
+    n / p          next / previous change   (also F7 / Shift-F7, Cmd-J / Cmd-K)
+    ] / [          next / previous file     (also Cmd-Down / Cmd-Up)
+    Cmd-W / Cmd-Q  close / quit
+
+diffy --help shows everything.

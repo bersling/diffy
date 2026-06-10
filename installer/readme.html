@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  body { font-family: -apple-system, Helvetica, sans-serif; font-size: 13px; margin: 16px; }
+  code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  pre { background: #f2f2f2; padding: 8px 10px; border-radius: 6px; }
+  h2 { font-size: 15px; }
+</style>
+</head>
+<body>
+<h2>What gets installed</h2>
+<ul>
+  <li><code>/usr/local/bin/diffy</code> — the diff viewer (universal: Apple&nbsp;Silicon &amp; Intel)</li>
+  <li><code>/usr/local/share/diffy/uninstall.sh</code> — uninstaller</li>
+</ul>
+
+<h2>Usage</h2>
+<p>Open Terminal inside any git repository:</p>
+<pre>diffy                    # branch-selection wizard
+diffy master develop     # compare two branches
+diffy origin/master origin/develop
+diffy master...develop   # merge-base semantics (like a GitLab MR)
+diffy --help             # everything else</pre>
+
+<h2>How to FULLY uninstall</h2>
+<p>Run the bundled uninstaller:</p>
+<pre>sudo /usr/local/share/diffy/uninstall.sh</pre>
+<p>It removes everything diffy ever put on your system:</p>
+<ul>
+  <li><code>/usr/local/bin/diffy</code> (the program)</li>
+  <li><code>/usr/local/share/diffy/</code> (this uninstaller)</li>
+  <li>the macOS installer receipt (<code>pkgutil --forget com.taskbase.diffy</code>)</li>
+  <li><code>~/Library/Preferences/diffy.plist</code> (remembered window size/position)</li>
+</ul>
+<p>Or do the same by hand with the four commands above. diffy writes nothing
+else anywhere — no caches, no launch agents, no background services.</p>
+</body>
+</html>

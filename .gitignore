@@ -1,0 +1,4 @@
+# build artifacts (rebuild with `make build` / `make dist` / `make pkg`)
+/diffy
+/dist/
+.DS_Store
