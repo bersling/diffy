@@ -4,7 +4,7 @@ How many human prompts it took to build diffy — a native macOS git diff viewer
 with side-by-side panes, intra-line highlights, a folder tree, a branch wizard,
 fold-away unchanged lines, a .pkg installer, and a GitHub repo.
 
-Count: 16
+Count: 17
 
 (Bumped automatically by a Claude Code hook on every prompt; every prompt is
 also logged below.)
@@ -27,3 +27,4 @@ also logged below.)
 14. The counter only lists the first 8 prompts — list all of them, and remember to keep doing this.
 15. Is triple-dot really in place? Is the Keys.kt diff between the angular-upgrade and 105 branches real?
 16. Is the update installed on my system?
+17. GitLab GUI shows only client-folder changes for this MR — why does diffy show more?
