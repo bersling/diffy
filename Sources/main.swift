@@ -61,6 +61,7 @@ var twoDot = false
 var noFetch = false
 var copyLinesRange: ClosedRange<Int>? = nil
 var mentionUITestPath: String? = nil
+var fileFilterQuery: String? = nil
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -119,6 +120,10 @@ while i < args.count {
         i += 1
         guard i < args.count else { fail("--test-mention-ui requires a PNG path") }
         mentionUITestPath = args[i]
+    } else if arg == "--filter-files" {
+        i += 1
+        guard i < args.count else { fail("--filter-files requires a query") }
+        fileFilterQuery = args[i]
     } else if arg == "--collapse-folders" {
         collapseFoldersOnLaunch = true
     } else if arg == "--copy-lines" {
@@ -249,6 +254,7 @@ let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
                            autoConfirm: autoConfirm,
                            expandAllOnLaunch: expandAllOnLaunch,
                            collapseFoldersOnLaunch: collapseFoldersOnLaunch,
-                           copyLinesRange: copyLinesRange)
+                           copyLinesRange: copyLinesRange,
+                           fileFilterQuery: fileFilterQuery)
 app.delegate = delegate
 app.run()

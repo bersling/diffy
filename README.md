@@ -67,8 +67,9 @@ The token's user must have at least Reporter access to the project.
 - **Branch wizard** — plain `diffy` opens a picker: "Branch with diffs" and
   "Target branch", each with a local/remote toggle and live search
 - **Collapsible folder tree** sidebar with status badges (A/M/D/R/C/T), file
-  counts per folder, compressed single-child directory chains, and
-  collapse-all / expand-all buttons (also ⌥⌘← / ⌥⌘→)
+  counts per folder, compressed single-child directory chains, a **filter
+  field** (live path search), and collapse-all / expand-all buttons
+  (also ⌥⌘← / ⌥⌘→)
 - **Syntax highlighting** — built-in tokenizer (no dependencies) with
   Xcode-style colors for Swift, Kotlin, Java, TypeScript/JavaScript, Python,
   Go, Rust, C/C++/ObjC, C#, Ruby, PHP, shell, SQL, YAML, JSON, CSS/SCSS,

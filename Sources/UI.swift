@@ -1024,10 +1024,17 @@ final class FileNode {
     /// Builds a directory tree from the changed files, with single-child
     /// directory chains compressed ("src/main/java" style).
     static func buildTree(files: [ChangedFile]) -> (root: FileNode, byIndex: [Int: FileNode]) {
+        buildTree(files: Array(files.enumerated()).map { ($0.offset, $0.element) })
+    }
+
+    /// Builds the tree from files carrying their global session indices, so a
+    /// filtered subset still maps leaves back to the right `session.files` row.
+    static func buildTree(files: [(index: Int, file: ChangedFile)])
+        -> (root: FileNode, byIndex: [Int: FileNode]) {
         let root = FileNode(name: "")
         var byIndex: [Int: FileNode] = [:]
 
-        for (idx, file) in files.enumerated() {
+        for (idx, file) in files {
             let components = file.displayPath.split(separator: "/").map(String.init)
             var node = root
             for dir in components.dropLast() {
@@ -1163,13 +1170,17 @@ final class SidebarCellView: NSView {
 
 // MARK: - Sidebar controller
 
-final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate {
+final class SidebarViewController: NSViewController, NSOutlineViewDataSource,
+                                   NSOutlineViewDelegate, NSSearchFieldDelegate {
     let session: DiffSession
     let outline = NSOutlineView()
     var onSelect: ((Int) -> Void)?
 
     private var root = FileNode(name: "")
     private var nodeByFileIndex: [Int: FileNode] = [:]
+    private let searchField = NSSearchField()
+    private let countLabel = NSTextField(labelWithString: "")
+    private var filterText = ""
 
     init(session: DiffSession) {
         self.session = session
@@ -1204,8 +1215,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
         // Header: file count + collapse/expand-all buttons
-        let countLabel = NSTextField(labelWithString:
-            "\(session.files.count) file\(session.files.count == 1 ? "" : "s")")
+        countLabel.stringValue = "\(session.files.count) file\(session.files.count == 1 ? "" : "s")"
         countLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         countLabel.textColor = .secondaryLabelColor
 
@@ -1237,6 +1247,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         headerStack.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
         headerStack.translatesAutoresizingMaskIntoConstraints = false
 
+        // Filter field
+        searchField.placeholderString = "Filter files…"
+        searchField.delegate = self
+        searchField.sendsSearchStringImmediately = true
+        searchField.controlSize = .small
+        searchField.font = NSFont.systemFont(ofSize: 11)
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
@@ -1244,6 +1262,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let root = BackgroundView()
         root.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(headerStack)
+        root.addSubview(searchField)
         root.addSubview(separator)
         root.addSubview(scroll)
         NSLayoutConstraint.activate([
@@ -1251,7 +1270,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             headerStack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             headerStack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             headerStack.heightAnchor.constraint(equalToConstant: 28),
-            separator.topAnchor.constraint(equalTo: headerStack.bottomAnchor),
+            searchField.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 4),
+            searchField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
+            searchField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
+            separator.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 5),
             separator.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: separator.bottomAnchor),
@@ -1261,6 +1283,36 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             root.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
         ])
         self.view = root
+    }
+
+    // MARK: filtering
+
+    func controlTextDidChange(_ obj: Notification) {
+        applyFilter(searchField.stringValue)
+    }
+
+    private func applyFilter(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        filterText = trimmed
+        let selectedIndex = (outline.item(atRow: outline.selectedRow) as? FileNode)?.fileIndex
+
+        if trimmed.isEmpty {
+            (root, nodeByFileIndex) = FileNode.buildTree(files: session.files)
+            countLabel.stringValue = "\(session.files.count) file\(session.files.count == 1 ? "" : "s")"
+        } else {
+            let matches = session.files.enumerated()
+                .filter { $0.element.displayPath.range(of: trimmed, options: .caseInsensitive) != nil }
+                .map { (index: $0.offset, file: $0.element) }
+            (root, nodeByFileIndex) = FileNode.buildTree(files: matches)
+            let total = session.files.count
+            countLabel.stringValue = "\(matches.count) of \(total)"
+        }
+        outline.reloadData()
+        expandAll()
+        // Preserve selection if the file is still visible.
+        if let idx = selectedIndex, nodeByFileIndex[idx] != nil {
+            selectFile(at: idx)
+        }
     }
 
     override func viewDidLoad() {
@@ -1283,6 +1335,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     @objc func expandAllAction(_ sender: Any?) { expandAll() }
     @objc func collapseAllAction(_ sender: Any?) { collapseAll() }
+
+    /// Test hook: drive the filter as if typed into the search field.
+    func applyFilterForTest(_ query: String) {
+        searchField.stringValue = query
+        applyFilter(query)
+    }
 
     func selectFile(at index: Int) {
         guard let node = nodeByFileIndex[index] else { return }
@@ -2011,6 +2069,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let expandAllOnLaunch: Bool
     let collapseFoldersOnLaunch: Bool
     let copyLinesRange: ClosedRange<Int>?
+    let fileFilterQuery: String?
     var windowController: MainWindowController?
     var wizardController: WizardWindowController?
 
@@ -2019,7 +2078,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          screenshotPath: String?, initialFileIndex: Int = 0,
          initialChangeJumps: Int = 0, autoConfirm: Bool = false,
          expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false,
-         copyLinesRange: ClosedRange<Int>? = nil) {
+         copyLinesRange: ClosedRange<Int>? = nil, fileFilterQuery: String? = nil) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
@@ -2031,6 +2090,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.expandAllOnLaunch = expandAllOnLaunch
         self.collapseFoldersOnLaunch = collapseFoldersOnLaunch
         self.copyLinesRange = copyLinesRange
+        self.fileFilterQuery = fileFilterQuery
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2075,6 +2135,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if collapseFoldersOnLaunch {
             wc.sidebarVC.collapseAll()
+        }
+        if let query = fileFilterQuery {
+            wc.sidebarVC.applyFilterForTest(query)
         }
         if let range = copyLinesRange {
             // Headless test path: select rows in the right pane, copy, print.

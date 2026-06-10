@@ -32,7 +32,8 @@
   as text; `--screenshot <png>` renders the window to a PNG and exits.
   More hidden test flags: `--select <n>`, `--change <n>`, `--expand-all`,
   `--collapse-folders`, `--appearance light|dark`, `--auto-confirm`,
-  `--two-dot`, `--no-fetch`.
+  `--two-dot`, `--no-fetch`, `--filter-files <q>`, `--copy-lines a-b`,
+  `--test-mention <q>`, `--test-mention-ui <png>`.
 - Test fixture: `/tmp/diffy-fixture` (master/develop, covers
   modify/add/delete/rename/binary/unicode/nested dirs, bare remote at
   /tmp/diffy-remote.git). Recreate if missing.
