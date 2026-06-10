@@ -76,6 +76,8 @@ The token's user must have at least Reporter access to the project.
 - **Collapsed unchanged lines** — long unchanged runs fold behind a
   "⋯ 42 unchanged lines ⋯" bar (3 context lines kept around changes); click to
   expand, ⌘E expands all
+- **Line selection & copy** — click / shift-click / drag to select lines in
+  either pane, ⌘C or right-click → Copy
 - **Change navigation** — jump between change blocks, with a "Change 3 of 12" counter
 - **Line numbers**, hatched placeholders for inserted/removed regions
 - **Dark & light mode**, follows the system appearance
@@ -88,6 +90,7 @@ The token's user must have at least Reporter access to the project.
 | `n` / `p` (or `F7` / `⇧F7`, or `⌘J` / `⌘K`) | next / previous change |
 | `]` / `[` (or `⌘↓` / `⌘↑`) | next / previous file |
 | `⌘E` | expand all unchanged lines |
+| `⌘C` | copy selected lines (click/shift-click/drag to select; or right-click → Copy) |
 | `⌥⌘←` / `⌥⌘→` | collapse / expand all folders |
 | `↑` / `↓` in the sidebar | switch files |
 | `⌘W` / `⌘Q` | close / quit |

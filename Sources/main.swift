@@ -59,6 +59,7 @@ var expandAllOnLaunch = false
 var collapseFoldersOnLaunch = false
 var twoDot = false
 var noFetch = false
+var copyLinesRange: ClosedRange<Int>? = nil
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -100,6 +101,12 @@ while i < args.count {
         noFetch = true
     } else if arg == "--collapse-folders" {
         collapseFoldersOnLaunch = true
+    } else if arg == "--copy-lines" {
+        i += 1
+        guard i < args.count else { fail("--copy-lines requires a row range like 5-8") }
+        let parts = args[i].split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 2, parts[0] <= parts[1] else { fail("--copy-lines requires a row range like 5-8") }
+        copyLinesRange = parts[0]...parts[1]
     } else if arg.hasPrefix("-") {
         fail("unknown option: \(arg)\n\n\(usage)")
     } else {
@@ -205,6 +212,7 @@ let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
                            initialChangeJumps: initialChangeJumps,
                            autoConfirm: autoConfirm,
                            expandAllOnLaunch: expandAllOnLaunch,
-                           collapseFoldersOnLaunch: collapseFoldersOnLaunch)
+                           collapseFoldersOnLaunch: collapseFoldersOnLaunch,
+                           copyLinesRange: copyLinesRange)
 app.delegate = delegate
 app.run()

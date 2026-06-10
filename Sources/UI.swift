@@ -104,15 +104,18 @@ final class DiffHalfRowView: NSView {
     var side: PaneSide = .left
     var gutterWidth: CGFloat = 48
     var inCurrentBlock = false
+    var isSelectedLine = false
 
     override var isFlipped: Bool { true }
 
-    func configure(row: DiffRow, side: PaneSide, gutterWidth: CGFloat, inCurrentBlock: Bool) {
+    func configure(row: DiffRow, side: PaneSide, gutterWidth: CGFloat, inCurrentBlock: Bool,
+                   isSelectedLine: Bool = false) {
         self.line = side == .left ? row.left : row.right
         self.kind = row.kind
         self.side = side
         self.gutterWidth = gutterWidth
         self.inCurrentBlock = inCurrentBlock
+        self.isSelectedLine = isSelectedLine
         needsDisplay = true
     }
 
@@ -140,6 +143,10 @@ final class DiffHalfRowView: NSView {
 
         backgroundColor.setFill()
         bounds.fill()
+        if isSelectedLine {
+            Theme.accent.withAlphaComponent(0.22).setFill()
+            bounds.fill()
+        }
 
         if kind == .message {
             let text = line?.text ?? ""
@@ -457,10 +464,27 @@ final class CommentSpacerRowView: NSView {
 
 // MARK: - One pane (scroll view + table)
 
+/// Table that routes ⌘C (via the Edit menu's first-responder chain) to the
+/// pane's copy-selected-lines implementation.
+final class DiffTableView: NSTableView {
+    var onCopy: (() -> Void)?
+
+    @objc func copy(_ sender: Any?) {
+        onCopy?()
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        if aSelector == #selector(copy(_:)) {
+            return selectedRowIndexes.isEmpty == false
+        }
+        return super.responds(to: aSelector)
+    }
+}
+
 final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     let side: PaneSide
     let scrollView = NSScrollView()
-    let table = NSTableView()
+    let table = DiffTableView()
     private let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("code"))
 
     var rows: [DisplayRow] = []
@@ -498,7 +522,9 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         table.rowHeight = Theme.rowHeight
         table.selectionHighlightStyle = .none
         table.allowsEmptySelection = true
+        table.allowsMultipleSelection = true
         table.backgroundColor = Theme.codeBG
+        table.onCopy = { [weak self] in self?.copySelectedLines() }
         table.gridStyleMask = []
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.dataSource = self
@@ -561,7 +587,8 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
               let view = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? DiffHalfRowView
         else { return }
         view.configure(row: diffRow, side: side, gutterWidth: gutterWidth,
-                       inCurrentBlock: currentBlockRange?.contains(fullIndex) ?? false)
+                       inCurrentBlock: currentBlockRange?.contains(fullIndex) ?? false,
+                       isSelectedLine: table.isRowSelected(row))
     }
 
     private func updateColumnWidth() {
@@ -641,7 +668,8 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
                     return v
                 }()
             view.configure(row: diffRow, side: side, gutterWidth: gutterWidth,
-                           inCurrentBlock: currentBlockRange?.contains(fullIndex) ?? false)
+                           inCurrentBlock: currentBlockRange?.contains(fullIndex) ?? false,
+                           isSelectedLine: tableView.isRowSelected(row))
             return view
         case .fold(let range, let count):
             let view = (tableView.makeView(withIdentifier: FoldRowView.reuseID, owner: nil) as? FoldRowView)
@@ -684,23 +712,68 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         return Theme.rowHeight
     }
 
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        if case .line = rows[row] { return true }
+        return false
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        table.enumerateAvailableRowViews { _, row in
+            self.reconfigureRow(row)
+        }
+    }
+
+    /// Copies the text of the selected lines (this pane's side) to the clipboard.
+    func copySelectedLines() {
+        var lines: [String] = []
+        for row in table.selectedRowIndexes.sorted() {
+            guard case .line(_, let diffRow) = rows[row] else { continue }
+            if let line = side == .left ? diffRow.left : diffRow.right {
+                lines.append(line.text)
+            }
+        }
+        guard !lines.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(lines.joined(separator: "\n"), forType: .string)
+    }
 }
 
 extension DiffPane: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        guard commentingEnabled else { return }
         let row = table.clickedRow
         guard row >= 0, row < rows.count,
               case .line(let fullIndex, let diffRow) = rows[row] else { return }
         let line = side == .left ? diffRow.left : diffRow.right
         guard let line = line, diffRow.kind != .message else { return }
-        let item = NSMenuItem(title: "Add Comment on Line \(line.number)…",
-                              action: #selector(addCommentClicked(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = fullIndex
-        menu.addItem(item)
+
+        // Copy: the clicked line, or the whole selection if clicked inside it
+        let selection = table.selectedRowIndexes
+        let copyTitle = selection.contains(row) && selection.count > 1
+            ? "Copy \(selection.count) Lines"
+            : "Copy Line"
+        let copyItem = NSMenuItem(title: copyTitle,
+                                  action: #selector(copyClicked(_:)), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.representedObject = row
+        menu.addItem(copyItem)
+
+        if commentingEnabled {
+            let item = NSMenuItem(title: "Add Comment on Line \(line.number)…",
+                                  action: #selector(addCommentClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = fullIndex
+            menu.addItem(item)
+        }
+    }
+
+    @objc private func copyClicked(_ sender: NSMenuItem) {
+        guard let row = sender.representedObject as? Int else { return }
+        if !table.selectedRowIndexes.contains(row) {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        copySelectedLines()
     }
 
     @objc private func addCommentClicked(_ sender: NSMenuItem) {
@@ -1642,6 +1715,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let autoConfirm: Bool
     let expandAllOnLaunch: Bool
     let collapseFoldersOnLaunch: Bool
+    let copyLinesRange: ClosedRange<Int>?
     var windowController: MainWindowController?
     var wizardController: WizardWindowController?
 
@@ -1649,7 +1723,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          noFetch: Bool = false,
          screenshotPath: String?, initialFileIndex: Int = 0,
          initialChangeJumps: Int = 0, autoConfirm: Bool = false,
-         expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false) {
+         expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false,
+         copyLinesRange: ClosedRange<Int>? = nil) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
@@ -1660,6 +1735,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.autoConfirm = autoConfirm
         self.expandAllOnLaunch = expandAllOnLaunch
         self.collapseFoldersOnLaunch = collapseFoldersOnLaunch
+        self.copyLinesRange = copyLinesRange
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1705,6 +1781,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if collapseFoldersOnLaunch {
             wc.sidebarVC.collapseAll()
         }
+        if let range = copyLinesRange {
+            // Headless test path: select rows in the right pane, copy, print.
+            let pane = wc.contentVC.rightPane
+            pane.table.selectRowIndexes(IndexSet(integersIn: range), byExtendingSelection: false)
+            pane.copySelectedLines()
+            print(NSPasteboard.general.string(forType: .string) ?? "<empty pasteboard>")
+            NSApp.terminate(nil)
+        }
         if let wizard = wizardController {
             wizardController = nil
             wizard.close()
@@ -1739,6 +1823,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
+
+        // Standard Edit menu: without it, ⌘C/⌘V/⌘X/⌘A/⌘Z don't reach text
+        // fields (comment dialogs, wizard search) or the diff panes.
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
 
         let navMenuItem = NSMenuItem()
         let navMenu = NSMenu(title: "Navigate")
