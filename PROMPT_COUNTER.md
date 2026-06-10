@@ -4,7 +4,7 @@ How many human prompts it took to build diffy — a native macOS git diff viewer
 with side-by-side panes, intra-line highlights, a folder tree, a branch wizard,
 fold-away unchanged lines, a .pkg installer, and a GitHub repo.
 
-Count: 9
+Count: 10
 
 (Bumped automatically by a Claude Code hook on every prompt.)
 

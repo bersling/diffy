@@ -120,6 +120,14 @@ final class Git {
             .filter { $0 != "\(remote)/HEAD" }
     }
 
+    func resolve(_ ref: String) -> String? {
+        let r = run(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"])
+        guard r.status == 0 else { return nil }
+        let sha = String(decoding: r.stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return sha.isEmpty ? nil : sha
+    }
+
     func currentBranch() -> String? {
         let r = run(["symbolic-ref", "--short", "-q", "HEAD"])
         guard r.status == 0 else { return nil }
@@ -152,7 +160,24 @@ final class DiffSession {
     let files: [ChangedFile]
     private var cache: [Int: FileDiff] = [:]
 
-    init(cwd: String, refs: [String], paths: [String]) throws {
+    /// Resolves the left side of a comparison. By default (`twoDot == false`)
+    /// the left side is the merge base of base and target — GitLab-MR
+    /// semantics: only changes made on the target side are shown, never
+    /// commits the base branch is ahead by. `--two-dot` compares tips exactly.
+    private static func leftSide(git: Git, base: String, target: String,
+                                 twoDot: Bool) -> (ref: String, label: String) {
+        guard !twoDot,
+              let mergeBase = try? git.mergeBase(base, target),
+              let baseSha = git.resolve(base) else {
+            return (base, base)
+        }
+        if mergeBase == baseSha {
+            return (base, base)  // base is an ancestor of target; identical result
+        }
+        return (mergeBase, "\(base) (merge base)")
+    }
+
+    init(cwd: String, refs: [String], paths: [String], twoDot: Bool = false) throws {
         self.git = try Git(cwd: cwd)
 
         switch refs.count {
@@ -186,17 +211,19 @@ final class DiffSession {
                 rightLabel = b
             } else {
                 try git.verifyRef(ref)
-                leftRef = ref
+                let left = DiffSession.leftSide(git: git, base: ref, target: "HEAD", twoDot: twoDot)
+                leftRef = left.ref
+                leftLabel = left.label
                 rightRef = nil
-                leftLabel = ref
                 rightLabel = "Working tree"
             }
         case 2:
             try git.verifyRef(refs[0])
             try git.verifyRef(refs[1])
-            leftRef = refs[0]
+            let left = DiffSession.leftSide(git: git, base: refs[0], target: refs[1], twoDot: twoDot)
+            leftRef = left.ref
+            leftLabel = left.label
             rightRef = refs[1]
-            leftLabel = refs[0]
             rightLabel = refs[1]
         default:
             throw GitError(message: "too many refs (expected at most 2)")

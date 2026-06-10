@@ -10,18 +10,21 @@ USAGE:
 EXAMPLES:
   diffy                          open the branch-selection wizard
   diffy HEAD                     HEAD vs working tree
-  diffy master                   master vs working tree
-  diffy master develop           master vs develop
+  diffy master                   your work vs master (since you diverged from it)
+  diffy master develop           changes in develop since it diverged from master
   diffy origin/master origin/develop
-  diffy master..develop          same as: diffy master develop
-  diffy master...develop         merge-base(master, develop) vs develop
-  diffy master develop -- src/   limit to paths under src/
+  diffy master develop -- src/   limit to paths
+
+  Comparisons use the merge base by default (GitLab-MR semantics): commits
+  the base branch is ahead by are NOT shown. To compare branch tips exactly:
+  diffy --two-dot master develop (or: diffy master..develop) under src/
 
 KEYS:
   n / p (or ⌘J / ⌘K)             next / previous change
   ] / [ (or ⌘↓ / ⌘↑)             next / previous file
 
 OPTIONS:
+  --two-dot            compare tips exactly instead of using the merge base
   --dump               print the computed diff as text and exit (no GUI)
   --screenshot <path>  render the window to a PNG and exit
   -h, --help           show this help
@@ -43,6 +46,7 @@ var initialChangeJumps = 0
 var forcedAppearance: String? = nil
 var autoConfirm = false
 var expandAllOnLaunch = false
+var twoDot = false
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -78,6 +82,8 @@ while i < args.count {
         autoConfirm = true
     } else if arg == "--expand-all" {
         expandAllOnLaunch = true
+    } else if arg == "--two-dot" {
+        twoDot = true
     } else if arg.hasPrefix("-") {
         fail("unknown option: \(arg)\n\n\(usage)")
     } else {
@@ -99,7 +105,7 @@ do {
         wizardGit = try Git(cwd: FileManager.default.currentDirectoryPath)
     } else {
         session = try DiffSession(cwd: FileManager.default.currentDirectoryPath,
-                                  refs: refs, paths: paths)
+                                  refs: refs, paths: paths, twoDot: twoDot)
     }
 } catch {
     fail("\(error)")

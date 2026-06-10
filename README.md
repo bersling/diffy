@@ -14,14 +14,17 @@ Run it inside any git repository:
 ```sh
 diffy                              # open the branch-selection wizard
 diffy HEAD                         # HEAD vs working tree
-diffy master                       # master vs working tree
-diffy master develop               # branch vs branch
+diffy master                       # your work vs master (since you diverged from it)
+diffy master develop               # changes in develop since it diverged from master
 diffy origin/master origin/develop # remote refs work too
 diffy v1.0.0 v2.0.0                # tags, SHAs, anything git rev-parse accepts
-diffy master..develop              # same as: diffy master develop
-diffy master...develop             # merge-base(master, develop) vs develop (GitLab MR semantics)
 diffy master develop -- src/       # limit to paths
 ```
+
+Comparisons use the **merge base** by default (GitLab-MR / `...` semantics):
+you only see changes made on the right-hand branch — commits the base branch
+is ahead by are never shown as phantom reverts. For an exact tip-vs-tip
+comparison use `diffy --two-dot master develop` (or `diffy master..develop`).
 
 ## Features
 
