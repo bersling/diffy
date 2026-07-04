@@ -105,17 +105,43 @@ final class DiffHalfRowView: NSView {
     var gutterWidth: CGFloat = 48
     var inCurrentBlock = false
     var isSelectedLine = false
+    var softWrap = false
 
     override var isFlipped: Bool { true }
 
+    /// Character wrapping (not word): diff lines are code, and long tokens
+    /// (URLs, minified JS) must still break at the pane edge.
+    static let wrapStyle: NSParagraphStyle = {
+        let p = NSMutableParagraphStyle()
+        p.lineBreakMode = .byCharWrapping
+        return p
+    }()
+
+    /// Row height for `text` wrapped to `width`. Must agree with how
+    /// draw(_:) renders (same font, same paragraph style, same width) —
+    /// tokens don't change layout since every token uses Theme.codeFont.
+    static func wrappedRowHeight(_ text: String, width: CGFloat) -> CGFloat {
+        // Fast path: display text is tab-expanded, so ASCII fits exactly in
+        // count × charWidth; anything at or under the width is one line.
+        if CGFloat(text.count) * Theme.charWidth <= width { return Theme.rowHeight }
+        let attr = NSAttributedString(string: text, attributes: [
+            .font: Theme.codeFont,
+            .paragraphStyle: wrapStyle,
+        ])
+        let rect = attr.boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude),
+                                     options: [.usesLineFragmentOrigin])
+        return max(Theme.rowHeight, ceil(rect.height) + 3)
+    }
+
     func configure(row: DiffRow, side: PaneSide, gutterWidth: CGFloat, inCurrentBlock: Bool,
-                   isSelectedLine: Bool = false) {
+                   isSelectedLine: Bool = false, softWrap: Bool = false) {
         self.line = side == .left ? row.left : row.right
         self.kind = row.kind
         self.side = side
         self.gutterWidth = gutterWidth
         self.inCurrentBlock = inCurrentBlock
         self.isSelectedLine = isSelectedLine
+        self.softWrap = softWrap
         needsDisplay = true
     }
 
@@ -192,7 +218,9 @@ final class DiffHalfRowView: NSView {
         ]
         let numStr = "\(line.number)" as NSString
         let numSize = numStr.size(withAttributes: numAttrs)
-        numStr.draw(at: NSPoint(x: gutterWidth - 8 - numSize.width, y: (h - numSize.height) / 2),
+        // Wrapped rows are taller than one line: pin the number to the first line.
+        let numY = softWrap ? (Theme.rowHeight - numSize.height) / 2 : (h - numSize.height) / 2
+        numStr.draw(at: NSPoint(x: gutterWidth - 8 - numSize.width, y: numY),
                     withAttributes: numAttrs)
 
         let textX = gutterWidth + 8
@@ -201,8 +229,10 @@ final class DiffHalfRowView: NSView {
             .foregroundColor: NSColor.labelColor,
         ]
 
-        // Intra-line changed range
-        if let hl = line.highlight, hl.lowerBound <= line.text.count, hl.upperBound <= line.text.count {
+        // Intra-line changed range. When wrapping, the range can span visual
+        // lines, so it's applied as a background-color attribute instead.
+        if !softWrap,
+           let hl = line.highlight, hl.lowerBound <= line.text.count, hl.upperBound <= line.text.count {
             let chars = Array(line.text)
             let prefix = String(chars[0..<hl.lowerBound])
             let middle = String(chars[hl.lowerBound..<hl.upperBound])
@@ -241,6 +271,23 @@ final class DiffHalfRowView: NSView {
             }
             attributed = result
         }
+
+        if softWrap {
+            let mutable = NSMutableAttributedString(attributedString: attributed)
+            let full = NSRange(location: 0, length: mutable.length)
+            mutable.addAttribute(.paragraphStyle, value: Self.wrapStyle, range: full)
+            if let hl = line.highlight, hl.lowerBound < hl.upperBound,
+               hl.upperBound <= line.text.count {
+                let chars = Array(line.text)
+                let loc = String(chars[0..<hl.lowerBound]).utf16.count
+                let len = String(chars[hl.lowerBound..<hl.upperBound]).utf16.count
+                mutable.addAttribute(.backgroundColor, value: highlightColor,
+                                     range: NSRange(location: loc, length: len))
+            }
+            mutable.draw(in: NSRect(x: textX, y: 1.5, width: w - textX - 6, height: h - 3))
+            return
+        }
+
         let textY = (h - attributed.size().height) / 2
         attributed.draw(at: NSPoint(x: textX, y: textY))
     }
@@ -744,14 +791,22 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     var onDiscardDraft: ((MRThread) -> Void)?
     var onAddComment: ((Int, PaneSide) -> Void)?  // (fullIndex, side)
     var commentingEnabled = false
+    private(set) var softWrap = false
     weak var partner: DiffPane?
     private var isSyncing = false
     private var contentWidth: CGFloat = 0
     private var lastClipWidth: CGFloat = 0
+    private var lineHeightCache: [Int: CGFloat] = [:]
     private let contextMenu = NSMenu()
 
     private var clipWidth: CGFloat {
         max(240, scrollView.contentView.bounds.width)
+    }
+
+    /// Width available for line text in soft-wrap mode. Must match the rect
+    /// DiffHalfRowView draws into (bounds.width == clipWidth when wrapping).
+    private var wrapTextWidth: CGFloat {
+        max(60, clipWidth - gutterWidth - 8 - 6)
     }
 
     private var hasCommentRows: Bool {
@@ -800,9 +855,23 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         table.menu = contextMenu
     }
 
+    func setSoftWrap(_ on: Bool) {
+        guard on != softWrap else { return }
+        softWrap = on
+        lineHeightCache.removeAll()
+        updateColumnWidth()
+        table.reloadData()
+        if on {
+            let clip = scrollView.contentView
+            clip.setBoundsOrigin(NSPoint(x: 0, y: clip.bounds.origin.y))
+            scrollView.reflectScrolledClipView(clip)
+        }
+    }
+
     func setContent(rows: [DisplayRow], maxColumns: Int, maxLineNumber: Int) {
         self.rows = rows
         currentBlockRange = nil
+        lineHeightCache.removeAll()
         let digits = max(2, String(max(maxLineNumber, 1)).count)
         gutterWidth = CGFloat(digits) * Theme.charWidth + 20
         // Clamp: minified single-line files would otherwise exceed AppKit's
@@ -819,6 +888,7 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     /// fold is expanded: rows above the fold keep their offsets).
     func updateRows(_ rows: [DisplayRow]) {
         self.rows = rows
+        lineHeightCache.removeAll()
         table.reloadData()
     }
 
@@ -837,12 +907,12 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         else { return }
         view.configure(row: diffRow, side: side, gutterWidth: gutterWidth,
                        inCurrentBlock: currentBlockRange?.contains(fullIndex) ?? false,
-                       isSelectedLine: table.isRowSelected(row))
+                       isSelectedLine: table.isRowSelected(row), softWrap: softWrap)
     }
 
     private func updateColumnWidth() {
         let visible = scrollView.contentView.bounds.width
-        column.width = max(contentWidth, visible)
+        column.width = softWrap ? visible : max(contentWidth, visible)
     }
 
     func scrollToRow(_ row: Int, animated: Bool) {
@@ -884,15 +954,26 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     @objc private func frameChanged() {
         updateColumnWidth()
+        guard abs(clipWidth - lastClipWidth) > 0.5 else { return }
+        lastClipWidth = clipWidth
+        // Wrapped code lines re-measure against the new width.
+        var changed = IndexSet()
+        if softWrap {
+            lineHeightCache.removeAll()
+            for i in rows.indices {
+                if case .line = rows[i] { changed.insert(i) }
+            }
+        }
         // Comment cards wrap to the visible width; re-measure on resize.
-        if hasCommentRows && abs(clipWidth - lastClipWidth) > 0.5 {
-            lastClipWidth = clipWidth
-            let commentRows = IndexSet(rows.indices.filter {
-                if case .comment = rows[$0] { return true } else { return false }
-            })
+        if hasCommentRows {
+            for i in rows.indices {
+                if case .comment = rows[i] { changed.insert(i) }
+            }
+        }
+        if !changed.isEmpty {
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = 0
-            table.noteHeightOfRows(withIndexesChanged: commentRows)
+            table.noteHeightOfRows(withIndexesChanged: changed)
             NSAnimationContext.endGrouping()
             table.enumerateAvailableRowViews { rowView, row in
                 if case .comment(let thread, _, _) = self.rows[row],
@@ -918,7 +999,7 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
                 }()
             view.configure(row: diffRow, side: side, gutterWidth: gutterWidth,
                            inCurrentBlock: currentBlockRange?.contains(fullIndex) ?? false,
-                           isSelectedLine: tableView.isRowSelected(row))
+                           isSelectedLine: tableView.isRowSelected(row), softWrap: softWrap)
             return view
         case .fold(let range, let count):
             let view = (tableView.makeView(withIdentifier: FoldRowView.reuseID, owner: nil) as? FoldRowView)
@@ -957,6 +1038,19 @@ final class DiffPane: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         if case .comment(let thread, _, _) = rows[row] {
             return CommentRowView.height(thread: thread, cardWidth: clipWidth)
+        }
+        // Wrapped rows take the max of both sides so the two panes (which
+        // measure independently but at equal widths) stay row-aligned.
+        if softWrap, case .line(_, let diffRow) = rows[row], diffRow.kind != .message {
+            if let cached = lineHeightCache[row] { return cached }
+            var height = Theme.rowHeight
+            for line in [diffRow.left, diffRow.right] {
+                if let text = line?.text {
+                    height = max(height, DiffHalfRowView.wrappedRowHeight(text, width: wrapTextWidth))
+                }
+            }
+            lineHeightCache[row] = height
+            return height
         }
         return Theme.rowHeight
     }
@@ -1460,8 +1554,12 @@ final class ContentViewController: NSViewController {
     private let counterLabel = NSTextField(labelWithString: "")
     private let reviewButton = NSButton()
     private let commentsButton = NSButton()
+    private let wrapButton = NSButton()
     private var commentsPopover: NSPopover?
     var onNavigateToFile: ((Int) -> Void)?
+
+    static let softWrapDefaultsKey = "diffySoftWrap"
+    private(set) var softWrap = false
 
     private(set) var currentIndex: Int = -1
     private var currentDiff: FileDiff?
@@ -1556,7 +1654,20 @@ final class ContentViewController: NSViewController {
         commentsButton.toolTip = "Show all review comments in this MR"
         commentsButton.isHidden = true
 
-        let headerStack = NSStackView(views: [pathLabel, statsLabel, NSView(), commentsButton, reviewButton, counterLabel, prev, next])
+        wrapButton.setButtonType(.pushOnPushOff)
+        if #available(macOS 11.0, *),
+           let img = NSImage(systemSymbolName: "text.wordwrap", accessibilityDescription: "Soft Wrap")
+               ?? NSImage(systemSymbolName: "arrow.turn.down.left", accessibilityDescription: "Soft Wrap") {
+            wrapButton.image = img
+        } else {
+            wrapButton.title = "↩"
+        }
+        wrapButton.bezelStyle = .texturedRounded
+        wrapButton.target = self
+        wrapButton.action = #selector(toggleWrap(_:))
+        wrapButton.toolTip = "Soft-wrap long lines (W)"
+
+        let headerStack = NSStackView(views: [pathLabel, statsLabel, NSView(), commentsButton, reviewButton, counterLabel, wrapButton, prev, next])
         headerStack.orientation = .horizontal
         headerStack.spacing = 8
         headerStack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 10)
@@ -1601,6 +1712,21 @@ final class ContentViewController: NSViewController {
         ])
 
         self.view = root
+        setSoftWrap(UserDefaults.standard.bool(forKey: Self.softWrapDefaultsKey), persist: false)
+    }
+
+    func setSoftWrap(_ on: Bool, persist: Bool = true) {
+        softWrap = on
+        wrapButton.state = on ? .on : .off
+        leftPane.setSoftWrap(on)
+        rightPane.setSoftWrap(on)
+        if persist {
+            UserDefaults.standard.set(on, forKey: Self.softWrapDefaultsKey)
+        }
+    }
+
+    @objc func toggleWrap(_ sender: Any?) {
+        setSoftWrap(!softWrap)
     }
 
     func showFile(at index: Int) {
@@ -2073,6 +2199,9 @@ final class MainWindowController: NSWindowController {
         case "[":
             selectFile(offset: -1)
             return true
+        case "w":
+            contentVC.toggleWrap(nil)
+            return true
         default:
             return false
         }
@@ -2277,6 +2406,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let showCommentsOnLaunch: Bool
     let testShortcutGuard: Bool
     let testFilterJump: Bool
+    let wrapOnLaunch: Bool
     var windowController: MainWindowController?
     var wizardController: WizardWindowController?
 
@@ -2287,7 +2417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
          expandAllOnLaunch: Bool = false, collapseFoldersOnLaunch: Bool = false,
          copyLinesRange: ClosedRange<Int>? = nil, fileFilterQuery: String? = nil,
          showCommentsOnLaunch: Bool = false, testShortcutGuard: Bool = false,
-         testFilterJump: Bool = false) {
+         testFilterJump: Bool = false, wrapOnLaunch: Bool = false) {
         self.session = session
         self.wizardGit = wizardGit
         self.paths = paths
@@ -2303,6 +2433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.showCommentsOnLaunch = showCommentsOnLaunch
         self.testShortcutGuard = testShortcutGuard
         self.testFilterJump = testFilterJump
+        self.wrapOnLaunch = wrapOnLaunch
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2337,6 +2468,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = MainWindowController(session: session)
         windowController = wc
         wc.showWindow(nil)
+        if wrapOnLaunch {
+            // Test flag: turn wrap on without persisting it as a preference.
+            wc.contentVC.setSoftWrap(true, persist: false)
+        }
         if initialFileIndex > 0 && initialFileIndex < session.files.count {
             wc.sidebarVC.selectFile(at: initialFileIndex)
         }

@@ -31,10 +31,12 @@ EXAMPLES:
 KEYS:
   n / p (or ⌘J / ⌘K)             next / previous change
   ] / [ (or ⌘↓ / ⌘↑)             next / previous file
+  w                              toggle soft-wrapping of long lines
 
 OPTIONS:
   --two-dot            compare tips exactly instead of using the merge base
   --no-fetch           skip fetching; compare local snapshots of remote refs
+  --wrap               start with soft-wrap enabled (one-off; doesn't persist)
   --dump               print the computed diff as text and exit (no GUI)
   --screenshot <path>  render the window to a PNG and exit
   -h, --help           show this help
@@ -65,6 +67,7 @@ var fileFilterQuery: String? = nil
 var showCommentsOnLaunch = false
 var testShortcutGuard = false
 var testFilterJump = false
+var wrapOnLaunch = false
 
 var args = Array(CommandLine.arguments.dropFirst())
 var afterDoubleDash = false
@@ -104,6 +107,8 @@ while i < args.count {
         twoDot = true
     } else if arg == "--no-fetch" {
         noFetch = true
+    } else if arg == "--wrap" {
+        wrapOnLaunch = true
     } else if arg == "--test-mention" {
         // Headless self-test of @mention prefix matching.
         i += 1
@@ -267,6 +272,7 @@ let delegate = AppDelegate(session: session, wizardGit: wizardGit, paths: paths,
                            fileFilterQuery: fileFilterQuery,
                            showCommentsOnLaunch: showCommentsOnLaunch,
                            testShortcutGuard: testShortcutGuard,
-                           testFilterJump: testFilterJump)
+                           testFilterJump: testFilterJump,
+                           wrapOnLaunch: wrapOnLaunch)
 app.delegate = delegate
 app.run()
