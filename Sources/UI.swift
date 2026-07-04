@@ -1712,7 +1712,10 @@ final class ContentViewController: NSViewController {
         ])
 
         self.view = root
-        setSoftWrap(UserDefaults.standard.bool(forKey: Self.softWrapDefaultsKey), persist: false)
+        // Default on: only an explicitly saved preference (toggling with the
+        // button or 'w') turns wrap off across launches.
+        let saved = UserDefaults.standard.object(forKey: Self.softWrapDefaultsKey) as? Bool
+        setSoftWrap(saved ?? true, persist: false)
     }
 
     func setSoftWrap(_ on: Bool, persist: Bool = true) {
