@@ -1,8 +1,4 @@
-# build artifacts (rebuild with `make build` / `make dist` / `make pkg`)
-/diffy
-/dist/
-.DS_Store
-
-# web edition
+# build artifacts
 web/node_modules/
 web/dist/
+.DS_Store

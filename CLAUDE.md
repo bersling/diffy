@@ -10,35 +10,51 @@
    - no secrets, tokens, API keys, or credentials
    - no `.env` or key/certificate files
    - no hardcoded user-specific paths (`/Users/...`) or other private info
-   - build artifacts stay out of git (`diffy` binary and `dist/` are
+   - build artifacts stay out of git (`web/dist/` and `web/node_modules/` are
      gitignored — keep it that way)
 3. **Clean up after yourself before committing & pushing.** Remove anything
    that was only needed to get the work done: debug prints/flags, scratch and
-   temp files, stale staging directories (e.g. `dist/diffy/` keeps old files
-   unless wiped — the dist target now does `rm -rf` first; keep it that way),
-   leftover test output, dead code from abandoned approaches. After the
-   security scan, also eyeball `git status` for files that shouldn't exist
-   and the diff for changes that shouldn't be in it.
-
-(The prompt-counter experiment was removed on request — don't reintroduce it.)
+   temp files, leftover test output, dead code from abandoned approaches.
+   After the security scan, also eyeball `git status` for files that shouldn't
+   exist and the diff for changes that shouldn't be in it.
 
 ## Build & test
 
-- Build: `make build` (or `make install` to refresh `~/.local/bin/diffy`)
-- Ship artifacts: `make dist` (universal zip), `make pkg` (.pkg installer)
-- Compile flag matters: `-swift-version 5` (Swift 6 mode breaks AppKit
-  top-level code)
-- Headless verification: `diffy --dump <ref> <ref>` prints the computed diff
-  as text; `--screenshot <png>` renders the window to a PNG and exits.
-  More hidden test flags: `--select <n>`, `--change <n>`, `--expand-all`,
-  `--collapse-folders`, `--appearance light|dark`, `--auto-confirm`,
-  `--two-dot`, `--no-fetch`, `--filter-files <q>`, `--copy-lines a-b`,
-  `--test-mention <q>`, `--test-mention-ui <png>`, `--show-comments`,
-  `--wrap` (soft-wrap on for this run only; no UserDefaults write).
-  Screenshot capture composites child windows (popovers).
-- Test fixture: `/tmp/diffy-fixture` (master/develop, covers
-  modify/add/delete/rename/binary/unicode/nested dirs, bare remote at
-  /tmp/diffy-remote.git). Recreate if missing.
+### Build
+
+```sh
+make build          # same as: cd web && npm ci && npm run build
+make install        # build + symlink ~/.local/bin/diffy
+```
+
+Headless verification (byte-identical to the native Swift version):
+
+```sh
+npm start -- --dump <ref> <ref>   # from web/
+# or via the Makefile:
+node web/server/index.ts --dump master develop
+```
+
+Test fixture: `/tmp/diffy-fixture` (master/develop branches, covers
+modify/add/delete/rename/binary/unicode/nested dirs, bare remote at
+/tmp/diffy-remote.git). Recreate if missing.
+
+### Headless UI testing (without GitLab)
+
+```sh
+cd /tmp/diffy-fixture
+DIFFY_FAKE_MR=1 node web/server/index.ts --no-fetch --no-open --port 8480 master feature
+# Screenshot with headless Chrome:
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless --disable-gpu --window-size=1320,850 --hide-scrollbars \
+  --virtual-time-budget=3000 --screenshot=/tmp/shot.png \
+  "http://127.0.0.1:8480/?file=0&theme=dark"
+```
+
+URL test params (web equivalent of the native app's hidden test flags):
+`?file=N&change=N&expand-all&filter=q&wrap=0|1&theme=light|dark`
+
+Requirements: Node ≥ 22.6 (type-stripping built in), no other global deps.
 
 ## Semantics to preserve
 
@@ -54,38 +70,5 @@
   the Submit Review button; drafts are private, so create+delete is a safe
   E2E test. bulk_publish is the only untested-live call.
   @mentions: comment dialog autocompletes project members (/members/all);
-  test flags --test-mention <q> (match logic) and --test-mention-ui <png>
-  (popover render, composites child windows since CGWindowListCreateImage
-  is gone in macOS 15).
-   Token discovery: $DIFFY_GITLAB_TOKEN → ~/.config/diffy/gitlab-token →
-   gitlab MCP entries in ~/.claude.json → $GITLAB_TOKEN (401s skip to next).
-
-## Web edition (web/)
-
-Build & test:
-
-```sh
-make web              # npm ci + vite build (or: cd web && npm run build)
-make web-install      # build + install ~/.local/bin/diffy-web launcher
-npm start -- master develop   # from web/
-node server/index.ts --dump master develop  # headless (same format as Swift)
-```
-
-Headless testing without GitLab:
-
-```sh
-cd /tmp/diffy-fixture
-DIFFY_FAKE_MR=1 node web/server/index.ts --no-fetch --no-open --port 8480 master feature
-# Screenshot with headless Chrome:
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --headless --disable-gpu --window-size=1320,850 --hide-scrollbars \
-  --virtual-time-budget=3000 --screenshot=/tmp/shot.png \
-  "http://127.0.0.1:8480/?file=0&theme=dark"
-```
-
-URL test params (web equivalent of native test flags):
-`?file=N&change=N&expand-all&filter=q&wrap=0|1&theme=light|dark`
-
-The test fixture at `/tmp/diffy-fixture` applies to both editions.
-
-Requirements: Node ≥ 22.6 (type-stripping built in), no other global deps.
+  Token discovery: $DIFFY_GITLAB_TOKEN → ~/.config/diffy/gitlab-token →
+  gitlab MCP entries in ~/.claude.json → $GITLAB_TOKEN (401s skip to next).
