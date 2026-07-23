@@ -5,7 +5,7 @@ build: web
 install: web-install
 
 uninstall:
-	rm -f $(PREFIX)/bin/diffy-web
+	rm -f $(PREFIX)/bin/diffy
 
 clean:
 	cd web && rm -rf dist node_modules
@@ -19,6 +19,7 @@ web:
 
 web-install: web
 	@mkdir -p $(PREFIX)/bin
+	@rm -f $(PREFIX)/bin/diffy   # never write through a stale symlink
 	@printf '%s\n' '#!/bin/sh' \
 	  'DIR="$(CURDIR)/web"' \
 	  'if [ ! -f "$$DIR/dist/index.html" ]; then (cd "$$DIR" && npm run build > /dev/null 2>&1); fi' \
