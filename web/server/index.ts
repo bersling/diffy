@@ -18,23 +18,23 @@ import { DiffSession, MRContext } from "./session.ts";
 import { GitLabClient, parseMRRef } from "./gitlab.ts";
 import { FakeMRClient } from "./fake-mr.ts";
 
-const usage = `diffy — fast side-by-side diff viewer for git (web edition)
+const usage = `diffy — fast side-by-side diff viewer for git
 
 USAGE:
-  diffy-web [options] [<ref> [<ref>]] [-- <path>...]
+  diffy [options] [<ref> [<ref>]] [-- <path>...]
 
 EXAMPLES:
-  diffy-web                        open the branch-selection wizard
-  diffy-web <gitlab-mr-url>        open a GitLab MR with inline review comments
-  diffy-web HEAD                   HEAD vs working tree
-  diffy-web master                 your work vs master (since you diverged from it)
-  diffy-web master develop         changes in develop since it diverged from master
-  diffy-web origin/master origin/develop
-  diffy-web master develop -- src/ limit to paths
+  diffy                            open the branch-selection wizard
+  diffy <gitlab-mr-url>            open a GitLab MR with inline review comments
+  diffy HEAD                       HEAD vs working tree
+  diffy master                     your work vs master (since you diverged from it)
+  diffy master develop             changes in develop since it diverged from master
+  diffy origin/master origin/develop
+  diffy master develop -- src/     limit to paths
 
   Comparisons use the merge base by default (GitLab-MR semantics): commits
   the base branch is ahead by are NOT shown. To compare branch tips exactly:
-  diffy-web --two-dot master develop (or: diffy-web master..develop)
+  diffy --two-dot master develop (or: diffy master..develop)
 
   Remote refs (origin/...) are fetched automatically before comparing, so the
   diff reflects the actual state on the remote. Skip with --no-fetch.
