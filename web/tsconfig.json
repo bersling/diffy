@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "skipLibCheck": true,
+    "erasableSyntaxOnly": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts", "src/**/*.ts", "vite.config.ts"]
+}

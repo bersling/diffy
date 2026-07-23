@@ -1,0 +1,21 @@
+{
+  "name": "diffy-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "diffy — fast side-by-side git diff viewer, web edition (local server + browser)",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "start": "node server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit && vite build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0"
+  }
+}

@@ -44,4 +44,18 @@ pkg:
 	             dist/diffy-1.0.pkg
 	rm -rf dist/pkgroot dist/pkgbuild
 
-.PHONY: build install uninstall clean dist pkg
+# ---------------------------------------------------------------------------
+# Web edition (browser-based port in web/)
+# ---------------------------------------------------------------------------
+
+web:
+	cd web && npm ci && npm run build
+
+web-install: web
+	@mkdir -p $(PREFIX)/bin
+	@printf '%s\n' '#!/bin/sh' \
+	  'exec node "$(CURDIR)/web/server/index.ts" "$$@"' > $(PREFIX)/bin/diffy-web
+	@chmod +x $(PREFIX)/bin/diffy-web
+	@echo "installed diffy-web -> $(PREFIX)/bin/diffy-web"
+
+.PHONY: build install uninstall clean dist pkg web web-install

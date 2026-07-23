@@ -2,3 +2,7 @@
 /diffy
 /dist/
 .DS_Store
+
+# web edition
+web/node_modules/
+web/dist/

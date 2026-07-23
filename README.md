@@ -137,3 +137,15 @@ swiftc -O -swift-version 5 -o diffy Sources/*.swift
 
 `diffy --dump master develop` prints the computed side-by-side diff as text and
 exits without opening a window — handy for testing and scripting.
+
+---
+
+## Web edition
+
+`web/` contains a browser-based port of diffy using the same CLI semantics.
+Requires Node ≥ 22.6. See [`web/README.md`](web/README.md) for details.
+
+```sh
+make web              # build the frontend
+npm start -- master develop   # open the diff in your browser
+```

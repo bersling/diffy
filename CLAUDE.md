@@ -57,5 +57,35 @@
   test flags --test-mention <q> (match logic) and --test-mention-ui <png>
   (popover render, composites child windows since CGWindowListCreateImage
   is gone in macOS 15).
-  Token discovery: $DIFFY_GITLAB_TOKEN → ~/.config/diffy/gitlab-token →
-  gitlab MCP entries in ~/.claude.json → $GITLAB_TOKEN (401s skip to next).
+   Token discovery: $DIFFY_GITLAB_TOKEN → ~/.config/diffy/gitlab-token →
+   gitlab MCP entries in ~/.claude.json → $GITLAB_TOKEN (401s skip to next).
+
+## Web edition (web/)
+
+Build & test:
+
+```sh
+make web              # npm ci + vite build (or: cd web && npm run build)
+make web-install      # build + install ~/.local/bin/diffy-web launcher
+npm start -- master develop   # from web/
+node server/index.ts --dump master develop  # headless (same format as Swift)
+```
+
+Headless testing without GitLab:
+
+```sh
+cd /tmp/diffy-fixture
+DIFFY_FAKE_MR=1 node web/server/index.ts --no-fetch --no-open --port 8480 master feature
+# Screenshot with headless Chrome:
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless --disable-gpu --window-size=1320,850 --hide-scrollbars \
+  --virtual-time-budget=3000 --screenshot=/tmp/shot.png \
+  "http://127.0.0.1:8480/?file=0&theme=dark"
+```
+
+URL test params (web equivalent of native test flags):
+`?file=N&change=N&expand-all&filter=q&wrap=0|1&theme=light|dark`
+
+The test fixture at `/tmp/diffy-fixture` applies to both editions.
+
+Requirements: Node ≥ 22.6 (type-stripping built in), no other global deps.
