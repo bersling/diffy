@@ -1,4 +1,0 @@
-#!/bin/sh
-DIR="/Users/bersling/IT-Projects/diffy/web"
-if [ ! -f "$DIR/dist/index.html" ]; then (cd "$DIR" && npm run build > /dev/null 2>&1); fi
-exec node "$DIR/server/index.ts" "$@"
