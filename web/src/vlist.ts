@@ -114,6 +114,9 @@ export class VList {
     this.spacer.style.visibility = "hidden";
     this.container.appendChild(this.spacer);
     this.container.addEventListener("scroll", () => this.queueRender());
+    // The first render can happen before layout (clientHeight ~0), leaving
+    // only the overscan rows; re-render when the viewport size changes.
+    new ResizeObserver(() => this.queueRender()).observe(this.container);
   }
 
   get scrollTop(): number {
